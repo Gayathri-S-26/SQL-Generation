@@ -46,7 +46,7 @@ Support all common document types: PDF, Word, Excel, CSV, and TXT.
 
 Generate accurate, standardized SQL for diverse transformation logic, including derived columns, conditional expressions, joins, and aggregations. 
 
-Enable semantic search and cross-document reference resolution to provide context-aware answers. 
+Enable semantic search and document reference resolution to provide context-aware answers. 
 
 Incorporate user feedback to refine SQL queries in real time and improve future results. 
 
