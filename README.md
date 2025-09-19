@@ -12,7 +12,7 @@ In modern data-driven organizations, business processes, ETL workflows, and anal
 
 Currently, converting these documents into SQL queries is manual and labor-intensive. Analysts or developers must carefully interpret the mapping documents, track cross-document references, and write SQL that accurately reflects the intended transformations. 
 
-**The challenges of this manual process include: **
+### The challenges of this manual process include: 
 
 Time-Consuming: Reading, understanding, and coding from multiple documents can take hours per project. 
 
@@ -26,7 +26,7 @@ Lack of Feedback Incorporation: Existing processes do not systematically leverag
 
 As a result, organizations face delays, increased operational costs, and risks of inaccurate data transformations in critical business processes. 
 
-**There is a need for an automated system that can: **
+### There is a need for an automated system that can: 
 
 Ingest multiple document types. 
 
@@ -38,7 +38,7 @@ Incorporate user feedback to continuously improve accuracy and efficiency.
 
 This project addresses these challenges by combining document ingestion, semantic search, LLM-based query generation, and a feedback-driven refinement loop to reduce manual effort, improve reliability, and accelerate SQL generation. 
 
-**OBJECTIVE: **
+## OBJECTIVE: 
 
 Automate SQL query generation from project documents, reducing manual effort and errors. 
 
@@ -59,16 +59,15 @@ Provide chat-like interface where users can interact naturally (ask questions, r
 Provide analytics dashboard to monitor usage, performance, and feedback. 
 
  
-
-**APPROACH: **
+## APPROACH: 
 
 The system is designed as a document ingestion, indexing, and LLM-based query platform with feedback-driven refinement: 
 
-**1. Project Creation **
+### 1. Project Creation 
 
 Users can create projects to group and manage related documents for a specific workflow. 
 
-**2. Document Loading & Splitting **
+### 2. Document Loading & Splitting **
 
 Supports PDFs, Word, Excel, CSV, and TXT files. 
 
@@ -76,7 +75,7 @@ Documents are parsed using Unstructured and split into hierarchical chunks with 
 
 Text elements respect headings and sections; tables and rows are preserved with schema metadata. 
 
-**3. Database Storage **
+### 3. Database Storage **
 
 SQLite stores: 
 
@@ -86,7 +85,7 @@ Documents: file info and processing status.
 
 Document Chunks: split content with metadata. 
 
-**4. Embeddings & Semantic Search **
+### 4. Embeddings & Semantic Search **
 
 Chunks are embedded using HuggingFace all-MiniLM-L6-v2 embeddings. 
 
@@ -94,7 +93,7 @@ Each project maintains a FAISS vectorstore for semantic retrieval.
 
 Semantic search allows retrieval of relevant content across the entire project. 
 
-**5. Query Retrieval **
+### 5. Query Retrieval **
 
 Queries are processed in an agentic workflow: 
 
@@ -104,13 +103,13 @@ Retrieve relevant chunks from those documents.
 
 Retrieve additional project-wide chunks using FAISS. 
 
-**6. Gemini LLM Integration **
+### 6. Gemini LLM Integration **
 
 Structured context (query + chunks) is sent to Gemini LLM (gemini-2.5-flash). 
 
 LLM generates coherent, context-aware SQL queries or explanations. 
 
-**7.Chat-like Interface** 
+### 7.Chat-like Interface** 
 
 Users ask queries directly in a conversational chat UI. 
 
@@ -122,7 +121,7 @@ SQL queries or answers are generated and returned in chat.
 
 History preserved per conversation (session-based). 
 
-**8. Feedback Mechanism **
+### 8. Feedback Mechanism **
 
 Users provide feedback on generated SQL answers (positive 👍 or negative 👎). 
 
@@ -130,7 +129,7 @@ Users can provide feedback in the form of comments on generated SQL answers.
 
 Feedback is stored in the database along with query details and metadata. 
 
-**8. Workflow Summary **
+### 8. Workflow Summary **
 
 Create Project → /project endpoint. 
 
@@ -140,7 +139,7 @@ Query Documents → /query endpoint; returns LLM-generated SQL based on relevant
 
 Provide Feedback → thumbs up/down. 
 
-**9. Advantages** 
+### 9. Advantages** 
 
 Hierarchical chunking ensures context is preserved. 
 
@@ -152,9 +151,9 @@ Project-based isolation supports multiple workflows independently.
 
 
 
-**Tracking Dashboard: **
+## Analytics Dashboard: **
  
-1. Overview KPIs 
+### 1. Overview KPIs 
 
 ✅ Total Projects 
 
@@ -166,7 +165,7 @@ Project-based isolation supports multiple workflows independently.
 
 ✅ Feedback Collected 
 
-2. 🧑‍🤝‍🧑 User Analytics 
+### 2. 🧑‍🤝‍🧑 User Analytics 
 
 Queries per User 
 
@@ -174,7 +173,7 @@ Sessions per User (conversations per user)
 
 Average Queries per Session 
 
-3. 📂 Query Analytics 
+### 3. 📂 Query Analytics 
 
 Queries per Project 
 
@@ -182,7 +181,7 @@ Conversation Depth (average queries per conversation + distribution histogram)
 
 Query Trends Over Time 
 
-4. ⚡ Performance & Quality Metrics 
+### 4. ⚡ Performance & Quality Metrics 
 
 Average Response Time (sec) 
 
@@ -192,7 +191,7 @@ Retry Rate (% queries retried)
 
 Fallback Rate (% queries where fallback happened) 
 
-5. 👍👎 Feedback Analytics 
+### 5. 👍👎 Feedback Analytics 
 
 Positive vs Negative Feedback Ratio 
 
@@ -200,7 +199,7 @@ Common Feedback Reasons (Top Keywords from comments)
 
 User Feedback Comments Explorer (table) 
 
-6. 🔍 Conversation Explorer 
+### 6. 🔍 Conversation Explorer 
 
 Filter by User ID 
 
