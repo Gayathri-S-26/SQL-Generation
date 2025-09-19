@@ -24,7 +24,7 @@ def verify_password(password: str, hashed: str) -> bool:
 # ----------------------------
 # JWT utils
 # ----------------------------
-SECRET_KEY = os.getenv("SECRET_KEY", "supersecretkey")
+SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 
@@ -110,8 +110,8 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 # Create initial admin if not exists
 # ----------------------------
 def create_initial_admin():
-    admin_username = os.getenv("ADMIN_USERNAME", "admin")
-    admin_password = os.getenv("ADMIN_PASSWORD", "admin123")
+    admin_username = os.getenv("ADMIN_USERNAME")
+    admin_password = os.getenv("ADMIN_PASSWORD")
     conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT id FROM users WHERE username=?", (admin_username,))
