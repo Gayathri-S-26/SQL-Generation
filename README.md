@@ -1,6 +1,6 @@
 # SQL-Generation
 
-**PROBLEM STATEMENT: **
+### PROBLEM STATEMENT: 
 
 In modern data-driven organizations, business processes, ETL workflows, and analytics pipelines are often documented in various formats including PDFs, Word documents, Excel sheets, CSVs, and Jira tickets. These documents contain crucial information such as: 
 
