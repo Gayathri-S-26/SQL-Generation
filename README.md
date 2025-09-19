@@ -14,49 +14,49 @@ Currently, converting these documents into SQL queries is manual and labor-inten
 
 ### The challenges of this manual process include: 
 
-Time-Consuming: Reading, understanding, and coding from multiple documents can take hours per project. 
+* Time-Consuming: Reading, understanding, and coding from multiple documents can take hours per project. 
 
-Error-Prone: Manual SQL generation is susceptible to mistakes, such as missing columns, incorrect joins, or faulty aggregations. 
+* Error-Prone: Manual SQL generation is susceptible to mistakes, such as missing columns, incorrect joins, or faulty aggregations. 
 
-Non-Scalable: Each new project or update to existing documentation requires repeating the same manual effort. 
+* Non-Scalable: Each new project or update to existing documentation requires repeating the same manual effort. 
 
-Knowledge-Dependent: SQL generation heavily relies on individual expertise. New team members may struggle, leading to inconsistencies. 
+* Knowledge-Dependent: SQL generation heavily relies on individual expertise. New team members may struggle, leading to inconsistencies. 
 
-Lack of Feedback Incorporation: Existing processes do not systematically leverage previous corrections or user feedback to improve accuracy over time. 
+* Lack of Feedback Incorporation: Existing processes do not systematically leverage previous corrections or user feedback to improve accuracy over time. 
 
 As a result, organizations face delays, increased operational costs, and risks of inaccurate data transformations in critical business processes. 
 
 ### There is a need for an automated system that can: 
 
-Ingest multiple document types. 
+* Ingest multiple document types. 
 
-Understand hierarchical structures and relationships across documents. 
+* Understand hierarchical structures and relationships across documents. 
 
-Generate accurate SQL queries automatically. 
+* Generate accurate SQL queries automatically. 
 
-Incorporate user feedback to continuously improve accuracy and efficiency. 
+* Incorporate user feedback to continuously improve accuracy and efficiency. 
 
 This project addresses these challenges by combining document ingestion, semantic search, LLM-based query generation, and a feedback-driven refinement loop to reduce manual effort, improve reliability, and accelerate SQL generation. 
 
 ## OBJECTIVE: 
 
-Automate SQL query generation from project documents, reducing manual effort and errors. 
+* Automate SQL query generation from project documents, reducing manual effort and errors. 
 
-Support all common document types: PDF, Word, Excel, CSV, and TXT. 
+* Support all common document types: PDF, Word, Excel, CSV, and TXT. 
 
-Generate accurate, standardized SQL for diverse transformation logic, including derived columns, conditional expressions, joins, and aggregations. 
+* Generate accurate, standardized SQL for diverse transformation logic, including derived columns, conditional expressions, joins, and aggregations. 
 
-Enable semantic search and document reference resolution to provide context-aware answers. 
+* Enable semantic search and document reference resolution to provide context-aware answers. 
 
-Incorporate user feedback to refine SQL queries in real time and improve future results. 
+* Incorporate user feedback to refine SQL queries in real time and improve future results. 
 
-Minimize dependency on individual SQL expertise while improving productivity, consistency, and reliability. 
+* Minimize dependency on individual SQL expertise while improving productivity, consistency, and reliability. 
 
-Automate SQL generation from project documents. 
+* Automate SQL generation from project documents. 
 
-Provide chat-like interface where users can interact naturally (ask questions, request SQL, refine). 
+* Provide chat-like interface where users can interact naturally (ask questions, request SQL, refine). 
 
-Provide analytics dashboard to monitor usage, performance, and feedback. 
+* Provide analytics dashboard to monitor usage, performance, and feedback. 
 
  
 ## APPROACH: 
@@ -67,7 +67,7 @@ The system is designed as a document ingestion, indexing, and LLM-based query pl
 
 Users can create projects to group and manage related documents for a specific workflow. 
 
-### 2. Document Loading & Splitting **
+### 2. Document Loading & Splitting 
 
 Supports PDFs, Word, Excel, CSV, and TXT files. 
 
@@ -75,7 +75,7 @@ Documents are parsed using Unstructured and split into hierarchical chunks with 
 
 Text elements respect headings and sections; tables and rows are preserved with schema metadata. 
 
-### 3. Database Storage **
+### 3. Database Storage 
 
 SQLite stores: 
 
@@ -85,7 +85,7 @@ Documents: file info and processing status.
 
 Document Chunks: split content with metadata. 
 
-### 4. Embeddings & Semantic Search **
+### 4. Embeddings & Semantic Search 
 
 Chunks are embedded using HuggingFace all-MiniLM-L6-v2 embeddings. 
 
@@ -93,7 +93,7 @@ Each project maintains a FAISS vectorstore for semantic retrieval.
 
 Semantic search allows retrieval of relevant content across the entire project. 
 
-### 5. Query Retrieval **
+### 5. Query Retrieval 
 
 Queries are processed in an agentic workflow: 
 
@@ -103,13 +103,13 @@ Retrieve relevant chunks from those documents.
 
 Retrieve additional project-wide chunks using FAISS. 
 
-### 6. Gemini LLM Integration **
+### 6. Gemini LLM Integration 
 
 Structured context (query + chunks) is sent to Gemini LLM (gemini-2.5-flash). 
 
 LLM generates coherent, context-aware SQL queries or explanations. 
 
-### 7.Chat-like Interface** 
+### 7.Chat-like Interface
 
 Users ask queries directly in a conversational chat UI. 
 
@@ -121,7 +121,7 @@ SQL queries or answers are generated and returned in chat.
 
 History preserved per conversation (session-based). 
 
-### 8. Feedback Mechanism **
+### 8. Feedback Mechanism 
 
 Users provide feedback on generated SQL answers (positive 👍 or negative 👎). 
 
@@ -129,7 +129,7 @@ Users can provide feedback in the form of comments on generated SQL answers.
 
 Feedback is stored in the database along with query details and metadata. 
 
-### 8. Workflow Summary **
+### 8. Workflow Summary 
 
 Create Project → /project endpoint. 
 
@@ -139,7 +139,7 @@ Query Documents → /query endpoint; returns LLM-generated SQL based on relevant
 
 Provide Feedback → thumbs up/down. 
 
-### 9. Advantages** 
+### 9. Advantages
 
 Hierarchical chunking ensures context is preserved. 
 
@@ -151,7 +151,7 @@ Project-based isolation supports multiple workflows independently.
 
 
 
-## Analytics Dashboard: **
+## Analytics Dashboard: 
  
 ### 1. Overview KPIs 
 
