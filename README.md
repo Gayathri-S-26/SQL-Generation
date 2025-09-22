@@ -95,7 +95,7 @@ Semantic search allows retrieval of relevant content across the entire project.
 
 ### 5. Query Retrieval 
 
-Queries are processed in an agentic workflow: 
+Queries are processed in workflow: 
 
 Detect mentioned document names. 
 
