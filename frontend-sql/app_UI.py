@@ -26,7 +26,12 @@ st.markdown("""
 body {
     background-color: #E3D6EF;
 }
-
+.appview-container .main .block-container {
+        padding-top: 1rem;  /* default is ~5rem, reduce as needed */
+        padding-left: 2rem;
+        padding-right: 2rem;
+        padding-bottom: 2rem;
+    }
 /* Make all sidebar buttons borderless */
 .stSidebar button {
     border: none;
@@ -114,6 +119,36 @@ if "doc_progress" not in st.session_state:
 if "new_uploads" not in st.session_state:
     st.session_state.new_uploads = []
 
+
+def render_header_with_back():
+    """Render global header and back button in same line."""
+    cols = st.columns([1, 9])  # Adjust ratio for back button vs header
+
+    with cols[0]:
+        # Back button logic
+        if st.session_state.page != "login" and st.session_state.page_history:
+            if st.button("← Back"):
+                while st.session_state.page_history:
+                    prev_page = st.session_state.page_history.pop()
+                    if prev_page != "login":
+                        st.session_state.page = prev_page
+                        st.rerun()
+
+    with cols[1]:
+        # Global header
+        st.markdown(
+            """
+            <h3 style='
+                text-align: center;  /* align left to stay next to back button */
+                color: #3F0D66; 
+                margin-top: 5px; 
+                margin-bottom: 5px;
+            '>🤖 AI-Powered SQL Automation</h3>
+            <hr style='margin-top: 5px; margin-bottom: 10px;'>
+            """,
+            unsafe_allow_html=True
+        )
+    
 # ----------------------------
 # Helper: Show User Info Banner
 # ----------------------------
@@ -197,6 +232,7 @@ if not st.session_state.access_token:
 # Login page
 # ----------------------------
 def login_page():
+    render_header_with_back()
     st.title("🔐 Login")
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
@@ -222,6 +258,7 @@ def login_page():
 # Page: Projects
 # ----------------------------
 def projects_page():
+    render_header_with_back()
     st.title("📁 Projects")
 
     # Create Project button (regular Streamlit button)
@@ -271,6 +308,7 @@ def projects_page():
 # Page: Create Project
 # ----------------------------
 def create_project_page():
+    render_header_with_back()
     st.title("➕ Create New Project")
 
     proj_name = st.text_input("Project Name")
@@ -297,6 +335,7 @@ def create_project_page():
 # Page: Project Detail
 # ----------------------------
 def project_detail_page():
+    render_header_with_back()
     headers = {"Authorization": f"Bearer {st.session_state.access_token}"}
 
     st.title(f"📂 Documents: {st.session_state.project_name}")
@@ -340,6 +379,7 @@ def project_detail_page():
 # Page: Upload Document
 # ----------------------------
 def upload_page():
+    render_header_with_back()
     st.title("➕ Add Documents")
 
     uploaded_files = st.file_uploader(
@@ -374,6 +414,7 @@ def upload_page():
 # Page: Query (Chat + Feedback)
 # ----------------------------
 def query_page():
+    render_header_with_back()
     st.title(f"💬 Queries - {st.session_state.project_name}")
     import streamlit.components.v1 as components
 
@@ -464,7 +505,8 @@ def query_page():
 # Page: Query History
 # ----------------------------
 def query_history():
-    st.title(f"🔍 Query History - {st.session_state.project_name}")
+    render_header_with_back()
+    st.title("🔍 Query History")
 
     try:
         headers = {"Authorization": f"Bearer {st.session_state.access_token}"}
@@ -511,21 +553,6 @@ def query_history():
 
     except Exception as e:
         st.error(f"Error loading Query history: {e}")
-
-# ----------------------------
-# Global Back Button
-# ----------------------------
-def render_back_button():
-    """Render back button if there is history (but never go back to login after login)."""
-    if st.session_state.page != "login" and st.session_state.page_history:
-        if st.button("← Back"):
-            # Keep popping until we find a non-login page
-            while st.session_state.page_history:
-                prev_page = st.session_state.page_history.pop()
-                if prev_page != "login":
-                    st.session_state.page = prev_page
-                    st.rerun()
-            # If only login is left in history, stay on current page
 
 # ----------------------------
 # Router
@@ -590,7 +617,6 @@ if st.session_state.page != "login":
             if st.button("📁 Projects"):
                 go_to_page("projects")
 
-render_back_button()
 
 if st.session_state.page == "login":
     login_page()
