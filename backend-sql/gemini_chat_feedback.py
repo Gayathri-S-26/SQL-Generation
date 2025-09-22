@@ -18,6 +18,7 @@ from split_embeddings import rebuild_project_index_from_store
 from langchain.schema import Document
 from google import genai
 from auth import get_current_user
+from rank_bm25 import BM25Okapi
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -118,48 +119,97 @@ def retrieve_from_doc_by_name(project_id: int, doc_name: str) -> List[Document]:
 # Retrieval based on User's Query
 # ----------------------------
 
-def retrieve_relevant_chunks(project_id: int, query: str, threshold: float = 0.7, max_candidates: int = 50) -> List[Document]:
+def retrieve_relevant_chunks(project_id: int, query: str, threshold: float = 0.7, max_candidates: int = 50, alpha: float = 0.5) -> List[Document]:
     """
-    Threshold-based retrieval:
+    Hybrid retrieval using FAISS (semantic) + BM25 (keyword):
     - Pull top-N candidates from FAISS.
-    - Keep only those above a similarity threshold.
-    - Deduplicate results.
+    - Compute BM25 scores on all docs.
+    - Normalize both scores and fuse.
+    - Deduplicate and return ranked results.
     """
+
     pi = load_project_index(project_id)
     if not pi.vectorstore:
         return []
 
-    # Step 1: Embed query
+    # ----------------------------
+    # Step 1: Embed query for FAISS
+    # ----------------------------
     query_embedding = pi.vectorstore.embedding_function.embed_query(query)
-
-    # Convert to numpy with correct shape
     query_embedding = np.array([query_embedding]).astype("float32")
 
-    # Step 2: Search FAISS for more candidates than needed
+    # ----------------------------
+    # Step 2: FAISS retrieval
+    # ----------------------------
     faiss_index = pi.vectorstore.index
     scores, indices = faiss_index.search(query_embedding, max_candidates)
 
-    # Step 3: Collect chunks above threshold
-    relevant_docs = []
+    faiss_docs = []
+    faiss_scores = []
     for score, idx in zip(scores[0], indices[0]):
-        if idx == -1:  # FAISS can return -1 for empty slots
+        if idx == -1:
             continue
-        if score >= threshold:
-            doc_id = pi.vectorstore.index_to_docstore_id[idx]
-            doc = pi.vectorstore.docstore.search(doc_id)
-            if doc:
-                relevant_docs.append(doc)
+        doc_id = pi.vectorstore.index_to_docstore_id[idx]
+        doc = pi.vectorstore.docstore.search(doc_id)
+        if doc:
+            faiss_docs.append(doc)
+            faiss_scores.append(score)
 
-    # Step 4: Deduplicate
-    seen = set()
+    # ----------------------------
+    # Step 3: BM25 retrieval
+    # ----------------------------
+    # Collect all docs for BM25 corpus
+    all_docs = list(pi.vectorstore.docstore._dict.values())
+    tokenized_corpus = [d.page_content.split() for d in all_docs]
+    bm25 = BM25Okapi(tokenized_corpus)
+    bm25_scores = bm25.get_scores(query.split())
+
+    # ----------------------------
+    # Step 4: Normalize scores
+    # ----------------------------
+    def normalize(arr):
+        arr = np.array(arr)
+        if arr.max() == arr.min():
+            return np.ones_like(arr)
+        return (arr - arr.min()) / (arr.max() - arr.min())
+
+    faiss_scores_norm = normalize(faiss_scores)
+    bm25_scores_norm = normalize(bm25_scores)
+
+    # ----------------------------
+    # Step 5: Fuse scores (Weighted Sum)
+    # ----------------------------
+    final_scores = {}
+
+    # Add FAISS docs first
+    for doc, f_score in zip(faiss_docs, faiss_scores_norm):
+        final_scores[doc.page_content] = alpha * f_score
+
+    # Add BM25 docs
+    for doc, b_score in zip(all_docs, bm25_scores_norm):
+        if doc.page_content in final_scores:
+            final_scores[doc.page_content] += (1 - alpha) * b_score
+        else:
+            final_scores[doc.page_content] = (1 - alpha) * b_score
+
+    # ----------------------------
+    # Step 6: Rank & Deduplicate
+    # ----------------------------
+    ranked = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
+
     unique_docs = []
-    for d in relevant_docs:
-        if d.page_content not in seen:
-            unique_docs.append(d)
-            seen.add(d.page_content)
+    seen = set()
+    for content, _ in ranked:
+        if content not in seen:
+            # Find the actual doc object
+            for d in all_docs:
+                if d.page_content == content:
+                    unique_docs.append(d)
+                    break
+            seen.add(content)
 
-    return unique_docs
-
+    return unique_docs[:max_candidates]
+    
 # ----------------------------
 # Query WorkFlow
 # ----------------------------
