@@ -24,71 +24,149 @@ embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 # ----------------------------
 def split_textual_document(filepath: str, max_chunk_size: int = 1000) -> List[Document]:
     """
-    Parse Word/PDF/TXT using unstructured and preserve hierarchy:
-    - Headings (Title) define new sections.
-    - Paragraphs, tables, lists are attached under the nearest heading.
-    - Each Document stores a 'hierarchy' breadcrumb in metadata.
-    - Large elements (long text or tables) are split into smaller chunks.
+    Improved chunking with smart grouping and relational metadata:
+    - Groups related elements (table descriptions + tables)
+    - Adds metadata linking for relational queries
+    - Maintains clean, focused chunks
+    - Preserves hierarchy and context
     """
     elements = partition(filename=filepath)
     documents = []
 
     hierarchy_stack = []  # Track active heading levels
-    current_section = []  # Collect elements under the current heading
+    current_group = []  # Group related elements together
+    chunk_counter = 0
 
-    def flush_section():
-        """Flush accumulated section into documents with hierarchy metadata."""
-        nonlocal current_section
-        if not current_section:
+    def flush_group():
+        """Flush current group as one or more documents with relational metadata."""
+        nonlocal current_group, chunk_counter
+        if not current_group:
             return
 
-        hierarchy = [el for el in hierarchy_stack]
-        for el in current_section:
-            text = el.text.strip()
-            if not text:
-                continue
-
-            # Split if element is too large
-            if len(text) > max_chunk_size:
-                # Sentence-based splitting for long paragraphs
-                subchunks = [
-                    text[i:i+max_chunk_size]
-                    for i in range(0, len(text), max_chunk_size)
-                ]
+        # Group 1: Table descriptions with their tables
+        grouped_elements = []
+        temp_group = []
+        
+        for el in current_group:
+            if el.category == "Table" and temp_group and temp_group[-1].category in ["UncategorizedText", "NarrativeText"]:
+                # Table follows a description - group them
+                temp_group.append(el)
             else:
-                subchunks = [text]
+                if temp_group:
+                    grouped_elements.append(temp_group)
+                temp_group = [el]
+        if temp_group:
+            grouped_elements.append(temp_group)
 
-            for idx, chunk in enumerate(subchunks):
-                documents.append(Document(
-                    page_content=chunk,
-                    metadata={
-                        "category": el.category,
-                        "filename": Path(filepath).name,
-                        "hierarchy": hierarchy,
-                        "parent_heading": hierarchy_stack[-1] if hierarchy_stack else None,
-                        "chunk_index": idx
-                    }
-                ))
-        current_section = []
+        # Create documents for each group
+        for group in grouped_elements:
+            if len(group) == 1:
+                # Single element - create individual chunk
+                el = group[0]
+                text = el.text.strip()
+                if not text:
+                    continue
+                    
+                # Split large elements but maintain context
+                if len(text) > max_chunk_size:
+                    chunks = [text[i:i+max_chunk_size] for i in range(0, len(text), max_chunk_size)]
+                    for idx, chunk in enumerate(chunks):
+                        documents.append(create_document(
+                            chunk, el, hierarchy_stack, filepath, chunk_counter
+                        ))
+                        chunk_counter += 1
+                else:
+                    documents.append(create_document(
+                        text, el, hierarchy_stack, filepath, chunk_counter
+                    ))
+                    chunk_counter += 1
+            else:
+                # Multiple related elements - combine if they fit
+                combined_text = "\n".join([el.text.strip() for el in group if el.text.strip()])
+                if len(combined_text) <= max_chunk_size:
+                    # Combine into one chunk
+                    primary_el = group[0]
+                    documents.append(create_document(
+                        combined_text, primary_el, hierarchy_stack, filepath, chunk_counter,
+                        related_elements=len(group),
+                        element_types=[el.category for el in group]
+                    ))
+                    chunk_counter += 1
+                else:
+                    # Keep separate but add linking metadata
+                    for i, el in enumerate(group):
+                        text = el.text.strip()
+                        if not text:
+                            continue
+                            
+                        doc = create_document(
+                            text, el, hierarchy_stack, filepath, chunk_counter,
+                            group_id=chunk_counter // len(group),  # Same group ID for related chunks
+                            element_index=i,
+                            total_elements=len(group)
+                        )
+                        documents.append(doc)
+                        chunk_counter += 1
 
+        current_group = []
+
+    def create_document(content, element, hierarchy, filepath, chunk_id, **extra_metadata):
+        """Helper to create Document with consistent metadata."""
+        metadata = {
+            "category": element.category,
+            "filename": Path(filepath).name,
+            "hierarchy": hierarchy.copy(),
+            "parent_heading": hierarchy[-1] if hierarchy else None,
+            "chunk_id": chunk_id,
+            "element_id": id(element),
+        }
+        metadata.update(extra_metadata)
+        
+        return Document(page_content=content, metadata=metadata)
+
+    # Process elements
     for el in elements:
         if not el.text.strip():
             continue
 
         if el.category == "Title":
-            # Flush previous section before starting new one
-            flush_section()
+            # Flush current group before new heading
+            flush_group()
             if hierarchy_stack:
                 hierarchy_stack.pop()
             hierarchy_stack.append(el.text.strip())
+            
+            # Title gets its own chunk
+            current_group = [el]
+            flush_group()
         else:
-            # Add this element under current heading
-            current_section.append(el)
+            current_group.append(el)
 
-    # Flush last section
-    flush_section()
+    # Flush final group
+    flush_group()
 
+    # Add sequential linking metadata for navigation
+    add_sequential_links(documents)
+    
     return documents
+
+def add_sequential_links(documents):
+    """Add metadata to link sequential chunks for better relational retrieval."""
+    for i in range(len(documents)):
+        if i > 0:
+            # Link to previous chunk
+            prev_id = documents[i-1].metadata.get("chunk_id")
+            if prev_id is not None:
+                documents[i].metadata["prev_chunk_id"] = prev_id
+        if i < len(documents) - 1:
+            # Link to next chunk
+            next_id = documents[i+1].metadata.get("chunk_id")
+            if next_id is not None:
+                documents[i].metadata["next_chunk_id"] = next_id
+        
+        # Add section context for relational queries
+        if "group_id" in documents[i].metadata:
+            documents[i].metadata["section_type"] = "related_group"
 
 def split_tabular_document(filepath: str, batch_size: int = 50):
     """Parse CSV/XLSX into schema + row batches for embedding."""
