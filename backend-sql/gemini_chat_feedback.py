@@ -121,13 +121,13 @@ def retrieve_from_doc_by_name(project_id: int, doc_name: str) -> List[Document]:
 
 def retrieve_relevant_chunks(project_id: int, query: str, threshold: float = 0.7, max_candidates: int = 50, alpha: float = 0.5) -> List[Document]:
     """
-    Hybrid retrieval using FAISS (semantic) + BM25 (keyword):
+    Hybrid retrieval using FAISS (semantic) + BM25 (keyword) with relational awareness:
     - Pull top-N candidates from FAISS.
     - Compute BM25 scores on all docs.
-    - Normalize both scores and fuse.
+    - Fuse scores.
+    - Include related chunks using group_id and sequential links.
     - Deduplicate and return ranked results.
     """
-
     pi = load_project_index(project_id)
     if not pi.vectorstore:
         return []
@@ -158,7 +158,6 @@ def retrieve_relevant_chunks(project_id: int, query: str, threshold: float = 0.7
     # ----------------------------
     # Step 3: BM25 retrieval
     # ----------------------------
-    # Collect all docs for BM25 corpus
     all_docs = list(pi.vectorstore.docstore._dict.values())
     tokenized_corpus = [d.page_content.split() for d in all_docs]
     bm25 = BM25Okapi(tokenized_corpus)
@@ -177,20 +176,38 @@ def retrieve_relevant_chunks(project_id: int, query: str, threshold: float = 0.7
     bm25_scores_norm = normalize(bm25_scores)
 
     # ----------------------------
-    # Step 5: Fuse scores (Weighted Sum)
+    # Step 5: Fuse scores with relational awareness
     # ----------------------------
     final_scores = {}
 
-    # Add FAISS docs first
-    for doc, f_score in zip(faiss_docs, faiss_scores_norm):
-        final_scores[doc.page_content] = alpha * f_score
-
-    # Add BM25 docs
-    for doc, b_score in zip(all_docs, bm25_scores_norm):
-        if doc.page_content in final_scores:
-            final_scores[doc.page_content] += (1 - alpha) * b_score
+    def add_doc(doc, score):
+        key = doc.page_content
+        if key in final_scores:
+            final_scores[key] += score
         else:
-            final_scores[doc.page_content] = (1 - alpha) * b_score
+            final_scores[key] = score
+
+    # FAISS top docs
+    for doc, f_score in zip(faiss_docs, faiss_scores_norm):
+        add_doc(doc, alpha * f_score)
+
+        # Add related group chunks
+        if "group_id" in doc.metadata:
+            group_id = doc.metadata["group_id"]
+            for d in all_docs:
+                if d.metadata.get("group_id") == group_id and d.page_content != doc.page_content:
+                    add_doc(d, alpha * f_score * 0.8)  # slightly lower weight for related
+
+        # Add sequential neighbors
+        prev_id = doc.metadata.get("prev_chunk_id")
+        next_id = doc.metadata.get("next_chunk_id")
+        for neighbor in all_docs:
+            if neighbor.metadata.get("chunk_id") in [prev_id, next_id]:
+                add_doc(neighbor, alpha * f_score * 0.6)
+
+    # BM25 scores
+    for doc, b_score in zip(all_docs, bm25_scores_norm):
+        add_doc(doc, (1 - alpha) * b_score)
 
     # ----------------------------
     # Step 6: Rank & Deduplicate
@@ -201,7 +218,6 @@ def retrieve_relevant_chunks(project_id: int, query: str, threshold: float = 0.7
     seen = set()
     for content, _ in ranked:
         if content not in seen:
-            # Find the actual doc object
             for d in all_docs:
                 if d.page_content == content:
                     unique_docs.append(d)
