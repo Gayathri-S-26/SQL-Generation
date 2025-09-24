@@ -272,28 +272,33 @@ def query_workflow(project_id: int, user_query: str) -> str:
             
     # Step 4: Construct a single structured prompt for Gemini
     structured_prompt = f"""
-You are an AI SQL assistant. You have access to the following document contents:
+    # ROLE: Expert SQL Assistant
+    # CONTEXT: You are analyzing documentation to generate precise SQL queries.
 
-{final_json}
+    # AVAILABLE DOCUMENTATION:
+    {final_json}
 
+    # USER QUERY TO ANSWER:
+    {user_query}
 
-Follow the instructions in the user query exactly:
-{user_query}
+    # CRITICAL INSTRUCTIONS (MUST FOLLOW):
 
-Instructions:
-1. Generate valid SQL queries that answer the user question exactly.
-2. Use proper table and column names as given in the contexts.
-3. ***CRITICAL: Carefully read and interpret the content and their relationships. This point must be strictly followed.***
-4. Provide a complete, coherent, and accurate response based only on the above contexts.
-5. SQL queries should be in copy-friendly format.
-6. When explaining the query:
-   - generate an ER diagram-like ASCII structure:
-   - Each table is a box with its column names listed.
-   - Show join conditions using arrows (◄────►).
-   - Place aggregation/filter/GROUP BY/HAVING/ORDER BY/other conditions boxes separately and join them.
-   - Keep it compact and aligned, like a schema diagram.
-7. Use proper indentation for readability.
-"""
+    1. Generate valid SQL queries that answer the user question exactly.
+    2. Use proper table and column names as given in the contexts.
+    3. ***CRITICAL: Carefully read and interpret the content and their relationships. This point must be strictly followed.***
+    - Extract all tables, columns, datatypes, PKs, FKs, and relationships
+    - Infer business rules or constraints when mentioned
+    4. Provide a complete, coherent, and accurate response based only on the above contexts.
+    5. SQL queries should be in copy-friendly format.
+    6. When explaining the query:
+    - generate an ER diagram-like ASCII structure:
+    - Each table in its own box (┌─┐ │ └─┘)
+    - PKs with "PK:" prefix, FKs with "[FK]"
+    - Show joins with ◄────► arrows
+    - Place aggregation/filter/GROUP BY/HAVING/ORDER BY/other conditions boxes separately and join them.
+    - Keep it compact and aligned, like a schema diagram.
+    7. Use proper indentation for readability.
+    """
 
     # Step 5: Call Gemini API and return the answer
     final_answer, attempt_count, is_fallback= call_gemini(structured_prompt)
