@@ -14,7 +14,7 @@ os.makedirs(STORE_ROOT, exist_ok=True)
 # SQLite utilities
 # ----------------------------
 def get_connection():
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
+    return sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
 
 def init_db():
     conn = get_connection()
