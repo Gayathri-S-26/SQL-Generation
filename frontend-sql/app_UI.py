@@ -7,15 +7,6 @@ from analytics_dashboard import analytics_dashboard_page
 
 API_URL = "http://127.0.0.1:8000"
 
-# ----------------------------
-# Initialize cookie manager
-# ----------------------------
-cookies = EncryptedCookieManager(
-    prefix="myapp_",  # cookie prefix
-    password="super-secret-password-123!",  # secret key to encrypt cookie
-)
-if not cookies.ready():
-    st.stop()
     
 # ----------------------------
 # CSS Styling
@@ -108,10 +99,10 @@ if "project_id" not in st.session_state:
     st.session_state.project_id = None
 if "project_name" not in st.session_state:
     st.session_state.project_name = ""
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-if "conversation_id" not in st.session_state:
-    st.session_state.conversation_id = None
+if "chat_history" not in st.session_state or not isinstance(st.session_state.chat_history, dict):
+    st.session_state.chat_history = {}
+if "conversation_id" not in st.session_state or not isinstance(st.session_state.conversation_id, dict):
+    st.session_state.conversation_id = {}
 if "uploaded_docs" not in st.session_state:
     st.session_state.uploaded_docs = []
 if "doc_progress" not in st.session_state:
@@ -119,6 +110,15 @@ if "doc_progress" not in st.session_state:
 if "new_uploads" not in st.session_state:
     st.session_state.new_uploads = []
 
+# ----------------------------
+# Initialize cookie manager
+# ----------------------------
+cookies = EncryptedCookieManager(
+    prefix="myapp_",  # cookie prefix
+    password="super-secret-password-123!",  # secret key to encrypt cookie
+)
+if st.session_state.page not in ["register", "login"] and not cookies.ready():
+    st.stop()
 
 def render_header_with_back():
     """Render global header and back button in same line."""
@@ -208,32 +208,40 @@ def clear_access_token():
 # Attempt persistent login from cookie
 # ----------------------------
 if not st.session_state.access_token:
-    access_token = cookies.get("access_token")
-    if access_token:
-        try:
-            resp = requests.get(f"{API_URL}/verify_access_token",
-                                headers={"Authorization": f"Bearer {access_token}"})
-            if resp.status_code == 200:
-                data = resp.json()
-                st.session_state.user_id = data["user_id"]
-                st.session_state.username = data.get("username")
-                st.session_state.role = data.get("role", "user")
-                st.session_state.access_token = access_token
-                st.session_state.token_verified = True
-                last_page = cookies.get("last_page") or "projects"
-                st.session_state.page = last_page
-                st.rerun()
-            else:
+    if cookies.ready(): 
+        access_token = cookies.get("access_token")
+        if access_token:
+            try:
+                resp = requests.get(f"{API_URL}/verify_access_token",
+                                    headers={"Authorization": f"Bearer {access_token}"})
+                if resp.status_code == 200:
+                    data = resp.json()
+                    st.session_state.user_id = data["user_id"]
+                    st.session_state.username = data.get("username")
+                    st.session_state.role = data.get("role", "user")
+                    st.session_state.access_token = access_token
+                    st.session_state.token_verified = True
+                    last_page = cookies.get("last_page") or "projects"
+                    st.session_state.page = last_page
+                    st.rerun()
+                else:
+                    clear_access_token()
+            except Exception:
                 clear_access_token()
-        except Exception:
-            clear_access_token()
 
 # ----------------------------
 # Login page
 # ----------------------------
 def login_page():
     render_header_with_back()
-    st.title("🔐 Login")
+    col1, col2 = st.columns([8, 2])
+
+    with col1:
+        st.markdown("### 🔐 Login")  # Use markdown for smaller title if needed
+
+    with col2:
+        if st.button("New User → Register"):
+            go_to_page("register")
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
     if st.button("Login"):
@@ -253,6 +261,44 @@ def login_page():
                 st.error(f"❌ Login failed: {e}")
         else:
             st.error("❌ Enter username and password")
+
+# ----------------------------
+# Page: Register / Signup
+# ----------------------------
+def register_page():
+    render_header_with_back()
+    st.title("📝 Register")
+
+    # --- Top-right link back to login ---
+    col1, col2 = st.columns([8, 2])
+    with col2:
+        if st.button("← Back to Login"):
+            go_to_page("login")
+
+    # Input fields
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    confirm_password = st.text_input("Confirm Password", type="password")
+
+    if st.button("Register"):
+        if not username or not password or not confirm_password:
+            st.error("❌ All fields are required.")
+        elif password != confirm_password:
+            st.error("❌ Passwords do not match.")
+        else:
+            try:
+                # Call backend /register API
+                resp = requests.post(
+                    f"{API_URL}/register",
+                    json={"username": username, "password": password},
+                )
+                if resp.status_code == 200:
+                    st.success("✅ Registration successful! Please login.")
+                    go_to_page("login")  # navigate to login page
+                else:
+                    st.error(f"❌ {resp.json().get('detail', 'Registration failed')}")
+            except Exception as e:
+                st.error(f"❌ Failed: {e}")
 
 # ----------------------------
 # Page: Projects
@@ -321,11 +367,14 @@ def create_project_page():
                     json={"project_name": proj_name},
                     headers=headers,
                 )
-                data = resp.json()
-                st.session_state.project_id = data["project_id"]
-                st.session_state.project_name = data["project_name"]
-                st.success(f"✅ Project '{data['project_name']}' created")
-                go_to_page("projects")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    st.session_state.project_id = data["project_id"]
+                    st.session_state.project_name = data["project_name"]
+                    st.success(f"✅ Project '{data['project_name']}' created")
+                    go_to_page("projects")
+                else:
+                    st.error(f"Project Name already exists. Please choose a different name.")
             except Exception as e:
                 st.error(f"❌ Failed to create project: {e}")
         else:
@@ -404,9 +453,9 @@ def upload_page():
             for result in results:
                 if result.get("status") == "processing":
                     st.success(f"Uploaded: {result['doc_name']}")
+                    go_to_page("project_detail")
                 else:
                     st.error(result.get("message", "Upload error"))
-            go_to_page("project_detail")
         except Exception as e:
             st.error(f"❌ Upload failed: {e}")
 
@@ -416,18 +465,30 @@ def upload_page():
 def query_page():
     render_header_with_back()
     st.title(f"💬 Queries - {st.session_state.project_name}")
-    import streamlit.components.v1 as components
+    proj_id=st.session_state.project_id
+    if not proj_id:
+        st.warning("Please select a project first.")
+        return
+
+    if proj_id not in st.session_state.chat_history:
+        st.session_state.chat_history[proj_id] = []
+
+    if proj_id not in st.session_state.conversation_id:
+        st.session_state.conversation_id[proj_id] = None
+
+    chat_history = st.session_state.chat_history[proj_id]
+    conversation_id = st.session_state.conversation_id[proj_id]
 
     # Reset button only if history exists
     if st.session_state.chat_history:
         if st.button("🆕 New Query"):
-            st.session_state.chat_history = []
-            st.session_state.conversation_id = None
+            st.session_state.chat_history[proj_id] = []
+            st.session_state.conversation_id[proj_id] = None
             st.rerun()
 
     # Show past messages using st.chat_message
     st.markdown('<div class="chat-container">', unsafe_allow_html=True)
-    for idx, msg in enumerate(st.session_state.chat_history):
+    for idx, msg in enumerate(chat_history):
         if msg["role"] == "user":
             st.markdown(
                     f'<div class="chat-message user-message"><div class="user-bubble">{msg["content"]}</div></div>',
@@ -477,25 +538,25 @@ def query_page():
 
     # 🚀 Input is fixed at the bottom now
     if prompt := st.chat_input("Enter your Question..."):
-        st.session_state.chat_history.append({"role": "user", "content": prompt})
+        st.session_state.chat_history[proj_id].append({"role": "user", "content": prompt})
         payload = {
             "project_id": int(st.session_state.project_id),
             "query": prompt,
-            "conversation_id": st.session_state.conversation_id,
+            "conversation_id": conversation_id,
         }
         try:
             headers = {"Authorization": f"Bearer {st.session_state.access_token}"}
             with st.spinner("Generating response..."):
                 response = requests.post(f"{API_URL}/chat", json=payload, headers=headers)
                 data = response.json()
-                st.session_state.chat_history.append({
+                st.session_state.chat_history[proj_id].append({
                     "role": "assistant",
                     "content": data.get("answer", ""),
                     "query_id": data.get("query_id"),
                     "user_query": prompt,
                     "contexts": data.get("contexts", [])
                 })
-                st.session_state.conversation_id = data.get("conversation_id")
+                st.session_state.conversation_id[proj_id] = data.get("conversation_id")
             st.rerun()
         except Exception as e:
             st.error(f"❌ Failed: {e}")
@@ -560,7 +621,7 @@ def query_history():
 # ----------------------------
 # Sidebar Navigation (Streamlit native)
 # ----------------------------
-if st.session_state.page != "login":
+if st.session_state.page not in ["login", "register"]:
     with st.sidebar:
         # Always show user info + logout
         st.markdown("---")
@@ -620,6 +681,8 @@ if st.session_state.page != "login":
 
 if st.session_state.page == "login":
     login_page()
+if st.session_state.page == "register":
+    register_page()
 elif st.session_state.page == "projects":
     projects_page()
 elif st.session_state.page == "create_project":
