@@ -28,22 +28,26 @@ def create_or_get_project(req: ProjectRequest, current_user: dict = Depends(get_
     c.execute("SELECT id FROM projects WHERE name=?", (req.project_name,))
     row = c.fetchone()
     if row:
-        pid = row[0]
-    else:
-        c.execute("INSERT INTO projects (name, created_by) VALUES (?, ?)", (req.project_name, user_id))
-        pid = c.lastrowid
-        conn.commit()
-        # Get the user's role from users table
-        c.execute("SELECT role FROM users WHERE id=?", (user_id,))
-        user_role_row = c.fetchone()
-        user_role = user_role_row[0] if user_role_row else "user"
-
-        # Add entry to user_project table
-        c.execute(
-            "INSERT OR IGNORE INTO user_project (user_id, project_id, role) VALUES (?, ?, ?)",
-            (user_id, pid, user_role)
+        conn.close()
+        raise HTTPException(
+            status_code=400,
+            detail="❌ Project name already exists. Please choose a different name."
         )
-        conn.commit()
+        
+    c.execute("INSERT INTO projects (name, created_by) VALUES (?, ?)", (req.project_name, user_id))
+    pid = c.lastrowid
+    conn.commit()
+    # Get the user's role from users table
+    c.execute("SELECT role FROM users WHERE id=?", (user_id,))
+    user_role_row = c.fetchone()
+    user_role = user_role_row[0] if user_role_row else "user"
+
+    # Add entry to user_project table
+    c.execute(
+        "INSERT OR IGNORE INTO user_project (user_id, project_id, role) VALUES (?, ?, ?)",
+        (user_id, pid, user_role)
+    )
+    conn.commit()
     conn.close()
     load_project_index(pid)
     return {"project_id": pid, "project_name": req.project_name, "user_id": user_id}
@@ -88,11 +92,21 @@ async def upload_files(project_id: int = Query(...), files: List[UploadFile] = F
     conn_main.close()
 
     results = []
+    proj_dir = os.path.join(RAW_DIR, str(project_id))
+    os.makedirs(proj_dir, exist_ok=True)
+    
     for file in files:
-        filename = file.filename
-        proj_dir = os.path.join(RAW_DIR, str(project_id))
-        os.makedirs(proj_dir, exist_ok=True)
+        original_name = file.filename
+        filename = original_name
         filepath = os.path.join(proj_dir, filename)
+
+        # Automatically rename if file already exists
+        counter = 1
+        name, ext = os.path.splitext(original_name)
+        while os.path.exists(filepath):
+            filename = f"{name} ({counter}){ext}"
+            filepath = os.path.join(proj_dir, filename)
+            counter += 1
 
         try:
             with open(filepath, "wb") as f:
@@ -126,7 +140,6 @@ async def upload_files(project_id: int = Query(...), files: List[UploadFile] = F
             results.append({"status": "error", "doc_name": filename, "message": str(e)})
 
     return results
-
 # ----------------------------
 # Document Upload Status endpoint
 # ----------------------------
