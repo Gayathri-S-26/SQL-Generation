@@ -1,23 +1,65 @@
 # split_embeddings.py
-
-# Chunking and Saving the documents in vector DB
-
 import os
 import json
 from pathlib import Path
+import re
 from typing import List
+import fitz
 import pandas as pd
 from langchain.schema import Document
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from unstructured.partition.auto import partition
-from databases import load_project_index, persist_project_index, get_connection
+from backend_sql.databases import load_project_index, persist_project_index, get_connection
+import nltk
 
+# Add path to your offline nltk_data folder
+nltk.data.path.append(r"nltk_data")  
 # ----------------------------
 # Embedding model
 # ----------------------------
 
 embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
+
+def redact_pii(text: str) -> str:
+    """Simple regex-based PII redaction (email, phone, ID, etc)."""
+    if not text.strip():
+        return text
+
+    # Common regex patterns for PII
+    patterns = {
+        "EMAIL": r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
+        "PHONE": r"\+?\d[\d\s\-]{8,}\d",
+        "ID": r"\b[A-Z]{2,3}\d{4,}\b",  # e.g., PAN/employee IDs
+        "SSN": r"\b\d{3}-\d{2}-\d{4}\b",
+    }
+
+    redacted_text = text
+    for label, pattern in patterns.items():
+        redacted_text = re.sub(pattern, f"[{label}_REDACTED]", redacted_text)
+
+    return redacted_text
+
+
+def sanitize_user_query(query: str) -> str:
+
+    # 1. Basic prompt injection check
+    forbidden_phrases = [
+        "ignore previous instructions",
+        "forget your instructions",
+        "bypass safety",
+        "malicious",
+        "--",  # comment injection
+        "drop table",    # dangerous SQL
+        "delete from",   # dangerous SQL
+        "update ",   # dangerous SQL
+    ]
+    for phrase in forbidden_phrases:
+        query = re.sub(re.escape(phrase), "[REDACTED]", query, flags=re.IGNORECASE)
+
+    # 2. Strip leading/trailing spaces
+    return query.strip()
 
 # ----------------------------
 # Load & split with Unstructured
@@ -121,8 +163,8 @@ def split_textual_document(filepath: str, max_chunk_size: int = 1000) -> List[Do
             "element_id": id(element),
         }
         metadata.update(extra_metadata)
-        
-        return Document(page_content=content, metadata=metadata)
+        redacted_content = redact_pii(content)
+        return Document(page_content=redacted_content, metadata=metadata)
 
     # Process elements
     for el in elements:
@@ -168,6 +210,7 @@ def add_sequential_links(documents):
         if "group_id" in documents[i].metadata:
             documents[i].metadata["section_type"] = "related_group"
 
+
 def split_tabular_document(filepath: str, batch_size: int = 50):
     """Parse CSV/XLSX into schema + row batches for embedding."""
     ext = Path(filepath).suffix.lower()
@@ -189,18 +232,85 @@ def split_tabular_document(filepath: str, batch_size: int = 50):
         # Row batches
         for start in range(0, len(df), batch_size):
             batch = df.iloc[start:start + batch_size]
+            batch_text = f"Sheet: {sheet}\nRows {start}-{start+len(batch)-1}:\n{batch.to_csv(index=False)}"
+            redacted_content = redact_pii(batch_text)
             documents.append(Document(
-                page_content=f"Sheet: {sheet}\nRows {start}-{start+len(batch)-1}:\n{batch.to_csv(index=False)}",
+                page_content=redacted_content,
                 metadata={"category": "rows", "sheet": sheet, "batch": f"{start}-{start+len(batch)-1}"}
             ))
     return documents
+
+def split_pdf_document(filepath: str, max_chunk_size: int = 1000) -> List[Document]:
+    """
+    Extract text from PDF using PyMuPDF and split into Document chunks
+    using same logic as split_textual_document.
+    """
+
+    # Step 1: Extract text from PDF
+    elements = []
+    try:
+        with fitz.open(filepath) as pdf_doc:
+            for page_num, page in enumerate(pdf_doc):
+                text = page.get_text().strip()
+                if text:
+                    # Treat each page as an element
+                    elements.append(type("Element", (), {"text": text, "category": "Page"}))
+    except Exception as e:
+        raise RuntimeError(f"Failed to extract text from PDF: {e}")
+
+    # Step 2: Split like textual document
+    documents = []
+    hierarchy_stack = []
+    current_group = []
+    chunk_counter = 0
+
+    def flush_group():
+        nonlocal current_group, chunk_counter
+        if not current_group:
+            return
+        grouped_elements = [current_group]  # simple grouping for PDF pages
+        for group in grouped_elements:
+            combined_text = "\n".join([el.text.strip() for el in group if el.text.strip()])
+            if len(combined_text) <= max_chunk_size:
+                documents.append(create_document(combined_text, group[0], hierarchy_stack, filepath, chunk_counter))
+                chunk_counter += 1
+            else:
+                # Split large chunks
+                text = combined_text
+                chunks = [text[i:i+max_chunk_size] for i in range(0, len(text), max_chunk_size)]
+                for chunk in chunks:
+                    documents.append(create_document(chunk, group[0], hierarchy_stack, filepath, chunk_counter))
+                    chunk_counter += 1
+        current_group.clear()
+
+    def create_document(content, element, hierarchy, filepath, chunk_id, **extra_metadata):
+        metadata = {
+            "category": element.category,
+            "filename": Path(filepath).name,
+            "hierarchy": hierarchy.copy(),
+            "parent_heading": hierarchy[-1] if hierarchy else None,
+            "chunk_id": chunk_id,
+        }
+        metadata.update(extra_metadata)
+        redacted_content = redact_pii(content)
+        return Document(page_content=redacted_content, metadata=metadata)
+
+    # Add all pages to current group
+    current_group = elements
+    flush_group()
+    add_sequential_links(documents)
+
+    return documents
+
 
 
 def load_and_split_document(filepath: str):
     """Dispatcher: pick the right splitting strategy based on file type."""
     ext = Path(filepath).suffix.lower()
-    if ext in [".pdf", ".docx", ".doc", ".txt"]:
+    if ext in [".docx", ".doc", ".txt"]:
         return split_textual_document(filepath)
+    elif ext == ".pdf":
+        return split_pdf_document(filepath)
     elif ext in [".csv", ".xlsx"]:
         return split_tabular_document(filepath)
     else:
