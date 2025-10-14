@@ -2,7 +2,6 @@ pandas
 python-dotenv
 google-generativeai
 openpyxl
-streamlit
 google-genai
 fastapi
 uvicorn
@@ -19,9 +18,9 @@ langchain-community
 faiss-cpu
 unstructured
 rank-bm25
-passlib
-streamlit_cookies_manager
+bcrypt==4.0.1 
+passlib==1.7.4
 python-jose[cryptography]==3.3.0
 sentence-transformers
-unstructured
-bcrypt
+unstructured[pdf]
+sqlglot
