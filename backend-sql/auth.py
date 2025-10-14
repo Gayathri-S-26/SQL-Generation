@@ -1,5 +1,4 @@
 # auth.py
-# Login Authentication
 import os
 import sqlite3
 from datetime import datetime, timedelta
@@ -9,7 +8,7 @@ from pydantic import BaseModel
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 import uuid
-from databases import get_connection
+from backend_sql.databases import get_connection
 
 # ----------------------------
 # Password hashing
@@ -24,7 +23,7 @@ def verify_password(password: str, hashed: str) -> bool:
 # ----------------------------
 # JWT utils
 # ----------------------------
-SECRET_KEY = os.getenv("SECRET_KEY")
+SECRET_KEY = os.getenv("SECRET_KEY", "supersecretkey")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 
@@ -110,8 +109,8 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 # Create initial admin if not exists
 # ----------------------------
 def create_initial_admin():
-    admin_username = os.getenv("ADMIN_USERNAME")
-    admin_password = os.getenv("ADMIN_PASSWORD")
+    admin_username = os.getenv("ADMIN_USERNAME", "admin")
+    admin_password = os.getenv("ADMIN_PASSWORD", "admin123")
     conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT id FROM users WHERE username=?", (admin_username,))
