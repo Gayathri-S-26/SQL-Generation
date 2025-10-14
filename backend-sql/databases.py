@@ -38,7 +38,13 @@ def init_db():
         response_time FLOAT,
         attempts INTEGER DEFAULT 1,
         is_fallback BOOLEAN DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        precision1 REAL,
+        precision3 REAL,
+        precision5 REAL,
+        claim_support REAL,
+        query_coverage REAL,
+        num_claims INTEGER
     )""")
     c.execute("""
     CREATE TABLE IF NOT EXISTS projects (
