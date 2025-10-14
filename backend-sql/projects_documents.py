@@ -7,15 +7,16 @@ from typing import List
 from fastapi import APIRouter, Depends, UploadFile, File, BackgroundTasks, Query, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from databases import get_connection, load_project_index, persist_project_index, project_cache
+from backend_sql.databases import get_connection, load_project_index, persist_project_index, project_cache
 from langchain.schema import Document
-from split_embeddings import load_and_split_document, save_and_index, rebuild_project_index_from_store
-from auth import get_current_user
+from backend_sql.split_embeddings import load_and_split_document, save_and_index, rebuild_project_index_from_store
+from backend_sql.auth import get_current_user
 
 RAW_DIR = os.path.join(os.path.dirname(__file__), "data", "raw")
 os.makedirs(RAW_DIR, exist_ok=True)
 
 router = APIRouter()
+
 
 class ProjectRequest(BaseModel):
     project_name: str
@@ -51,6 +52,7 @@ def create_or_get_project(req: ProjectRequest, current_user: dict = Depends(get_
     conn.close()
     load_project_index(pid)
     return {"project_id": pid, "project_name": req.project_name, "user_id": user_id}
+
 
 @router.get("/projects")
 def list_projects(current_user: dict = Depends(get_current_user)):
@@ -140,6 +142,7 @@ async def upload_files(project_id: int = Query(...), files: List[UploadFile] = F
             results.append({"status": "error", "doc_name": filename, "message": str(e)})
 
     return results
+
 # ----------------------------
 # Document Upload Status endpoint
 # ----------------------------
