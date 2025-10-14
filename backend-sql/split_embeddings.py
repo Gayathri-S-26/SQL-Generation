@@ -11,10 +11,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from unstructured.partition.auto import partition
 from backend_sql.databases import load_project_index, persist_project_index, get_connection
-import nltk
 
-# Add path to your offline nltk_data folder
-nltk.data.path.append(r"nltk_data")  
 # ----------------------------
 # Embedding model
 # ----------------------------
