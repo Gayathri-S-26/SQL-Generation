@@ -7,7 +7,7 @@
     --light-purple: #E3D6EF;
     --card-bg: #FFFFFF;
     --icon-color: #FFFFFF;
-    --success: #28a745;
+    --success: #440475;
     --danger: #dc3545;
     --border-color: #E0E0E0;
     --shadow: 0 4px 12px rgba(0,0,0,0.1);
@@ -1448,6 +1448,7 @@ pre:hover .copy-btn {
 .feedback-actions {
     display: flex;
     gap: 0.5rem;
+    margin-bottom: 2%;
 }
 
 .feedback-submit-btn, .feedback-cancel-btn {
@@ -1828,5 +1829,1020 @@ pre:hover .copy-btn {
     #analytics-page .tab-btn {
         padding: 0.8rem 0.5rem;
         font-size: 0.7rem;
+    }
+}
+
+/* Add to your CSS */
+.icon-jira::before {
+    content: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%233F0D66'%3E%3Cpath d='M11.571 11.513H0a5.218 5.218 0 0 0 5.232 5.215h2.13v2.057A5.215 5.215 0 0 0 12.575 24V12.518a1.005 1.005 0 0 0-1.005-1.005zm5.723-5.723H5.736a5.215 5.215 0 0 0 5.215 5.214h2.129v2.058a5.218 5.218 0 0 0 5.215 5.214V6.795a1.001 1.001 0 0 0-1.001-1.005zM23.013 0H11.455a5.215 5.215 0 0 0 5.215 5.215h2.129v2.057A5.215 5.215 0 0 0 24 12.487V1.005A1.001 1.001 0 0 0 23.013 0z'/%3E%3C/svg%3E");
+    width: 18px;  /* Slightly smaller than other icons */
+    height: 18px;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+    display: inline-block;
+}
+/* ============================================= */
+/* ENHANCED JIRA PAGE STYLING - IMPROVED SPACING */
+/* ============================================= */
+
+/* Jira Page Container */
+#jira-page {
+    padding: 2rem;
+    overflow-y: auto;
+    height: 100%;
+}
+
+#jira-page h2 {
+    margin-bottom: 2rem;
+    color: var(--primary);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+/* Jira Connection Management Card */
+#jira-page .card {
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 2rem;
+    box-shadow: var(--shadow);
+    margin-bottom: 2rem;
+    border: 1px solid var(--border-color);
+    transition: all 0.3s ease;
+}
+
+#jira-page .card:hover {
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+}
+
+#jira-page .card h3 {
+    color: var(--primary);
+    margin-bottom: 1.5rem;
+    font-size: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+#jira-page .card h4 {
+    color: var(--primary);
+    margin: 2rem 0 1rem 0;
+    font-size: 1.2rem;
+    border-bottom: 2px solid var(--light-purple);
+    padding-bottom: 0.5rem;
+}
+
+/* Jira Connections List */
+#jira-connections-list {
+    margin: 1.5rem 0;
+}
+
+.connection-item {
+    border: 1px solid var(--border-color);
+    padding: 1.5rem;
+    margin: 1rem 0;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+    transition: all 0.3s ease;
+}
+
+.connection-item:hover {
+    border-color: var(--primary);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(63, 13, 102, 0.1);
+}
+
+.connection-item strong {
+    color: var(--primary);
+    font-size: 1.1rem;
+}
+
+.connection-item small {
+    color: #666;
+    font-size: 0.9rem;
+}
+
+.default-badge {
+    background: var(--success);
+    color: white;
+    padding: 0.3rem 0.8rem;
+    border-radius: 15px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-left: 1rem;
+}
+
+/* Jira Connection Form */
+#jira-connect-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    margin-top: 1.5rem;
+}
+
+#jira-connect-form input[type="url"],
+#jira-connect-form input[type="text"],
+#jira-connect-form input[type="password"] {
+    padding: 1rem 1.25rem;
+    border: 2px solid var(--border-color);
+    border-radius: 10px;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+    background: white;
+}
+
+#jira-connect-form input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(63, 13, 102, 0.1);
+    transform: translateY(-1px);
+}
+
+#jira-connect-form label {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    cursor: pointer;
+    padding: 0.75rem;
+    border-radius: 8px;
+    transition: background-color 0.3s ease;
+}
+
+#jira-connect-form label:hover {
+    background: var(--light-purple);
+}
+
+#jira-connect-form input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--primary);
+}
+
+#jira-connect-form button {
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+    color: white;
+    border: none;
+    border-radius: 10px;
+    padding: 1.25rem 2rem;
+    font-weight: 600;
+    font-size: 1.1rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-top: 1rem;
+    box-shadow: 0 4px 15px rgba(63, 13, 102, 0.25);
+}
+
+#jira-connect-form button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(63, 13, 102, 0.35);
+}
+
+/* Jira Browser Section */
+#jira-browser {
+    margin-top: 2rem;
+}
+
+#jira-connection-selector {
+    width: 100%;
+    padding: 1rem 1.25rem;
+    border: 2px solid var(--border-color);
+    border-radius: 10px;
+    font-size: 1rem;
+    margin-bottom: 2rem;
+    background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+    transition: all 0.3s ease;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%233F0D66' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 1rem center;
+    background-size: 16px;
+}
+
+#jira-connection-selector:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(63, 13, 102, 0.1);
+}
+
+/* Jira Projects Grid */
+#jira-projects-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+    margin-top: 1.5rem;
+}
+
+.jira-project-card {
+    background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+    border: 2px solid var(--border-color);
+    border-radius: 12px;
+    padding: 1.75rem;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+}
+
+.jira-project-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+    transform: scaleX(0);
+    transition: transform 0.3s ease;
+}
+
+.jira-project-card:hover {
+    border-color: var(--primary);
+    transform: translateY(-4px);
+    box-shadow: 0 12px 28px rgba(63, 13, 102, 0.15);
+}
+
+.jira-project-card:hover::before {
+    transform: scaleX(1);
+}
+
+.jira-project-card h4 {
+    color: var(--primary);
+    margin-bottom: 0.75rem;
+    font-size: 1.25rem;
+    font-weight: 700;
+}
+
+.jira-project-card p {
+    color: #666;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    margin: 0;
+}
+
+/* Jira Issues Section */
+#jira-issues-section {
+    margin-top: 2.5rem;
+    padding-top: 2rem;
+    border-top: 2px solid var(--light-purple);
+}
+
+#jira-issues-section h4 {
+    color: var(--primary);
+    margin-bottom: 1.5rem;
+    font-size: 1.3rem;
+}
+
+#current-project-name {
+    color: var(--secondary);
+    font-weight: 700;
+}
+
+#jira-issues-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    max-height: 60vh;
+    overflow-y: auto;
+    padding-right: 0.5rem;
+}
+
+/* Custom scrollbar for issues list */
+#jira-issues-list::-webkit-scrollbar {
+    width: 8px;
+}
+
+#jira-issues-list::-webkit-scrollbar-track {
+    background: #f8f9fa;
+    border-radius: 4px;
+}
+
+#jira-issues-list::-webkit-scrollbar-thumb {
+    background: var(--primary);
+    border-radius: 4px;
+}
+
+#jira-issues-list::-webkit-scrollbar-thumb:hover {
+    background: var(--secondary);
+}
+
+/* Jira Issue Cards */
+.jira-issue-card {
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1.5rem;
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+.jira-issue-card:hover {
+    border-color: var(--primary);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(63, 13, 102, 0.1);
+}
+
+.issue-content {
+    flex: 1;
+    min-width: 0; /* Allow text truncation */
+}
+
+.issue-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.issue-key {
+    font-weight: 700;
+    color: var(--primary);
+    font-size: 1.1rem;
+    white-space: nowrap;
+    background: var(--light-purple);
+    padding: 0.3rem 0.6rem;
+    border-radius: 6px;
+}
+
+.issue-summary {
+    flex: 1;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.4;
+    margin: 0;
+}
+
+.issue-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    font-size: 0.85rem;
+    color: #666;
+}
+
+.issue-meta span {
+    background: #f8f9fa;
+    padding: 0.3rem 0.6rem;
+    border-radius: 4px;
+    border: 1px solid #e9ecef;
+}
+
+/* Import Button */
+.import-btn {
+    background: linear-gradient(135deg, var(--success), #20c997);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0.75rem 1.25rem;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
+    flex-shrink: 0;
+}
+
+.import-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
+    background: linear-gradient(135deg, #20c997, var(--success));
+}
+
+/* Enhanced Modal Styling */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    backdrop-filter: blur(5px);
+}
+
+.modal-content {
+    background: white;
+    padding: 2.5rem;
+    border-radius: 16px;
+    max-width: 500px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    animation: modalSlideIn 0.3s ease-out;
+}
+
+@keyframes modalSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-30px) scale(0.9);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.modal-content h3 {
+    color: var(--primary);
+    margin-bottom: 1.5rem;
+    font-size: 1.5rem;
+    text-align: center;
+}
+
+.modal-content p {
+    text-align: center;
+    margin-bottom: 2rem;
+    color: #666;
+    font-size: 1.1rem;
+}
+
+.import-options {
+    margin: 2rem 0;
+}
+
+.import-options label {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    border: 2px solid var(--border-color);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-weight: 600;
+}
+
+.import-options label:hover {
+    border-color: var(--primary);
+    background: var(--light-purple);
+}
+
+.import-options input[type="radio"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--primary);
+}
+
+.import-options select,
+.import-options input[type="text"] {
+    width: 100%;
+    padding: 1rem 1.25rem;
+    border: 2px solid var(--border-color);
+    border-radius: 10px;
+    font-size: 1rem;
+    margin-top: 0.5rem;
+    transition: all 0.3s ease;
+}
+
+.import-options select:focus,
+.import-options input[type="text"]:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(63, 13, 102, 0.1);
+}
+
+/* Simple spacing solution */
+#existing-projects-select {
+    margin-bottom: 1.5rem !important; /* Adds space below the dropdown */
+}
+
+/* Optional: Also add some space above the create project section */
+#new-project-section {
+    margin-top: 1.5rem;
+}
+
+#new-project-name-input {
+    margin-bottom: 1.5rem;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: flex-end;
+    margin-top: 2rem;
+}
+
+.modal-actions button {
+    padding: 1rem 2rem;
+    border: none;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+#confirm-import-btn {
+    background: linear-gradient(135deg, var(--success), #20c997);
+    color: white;
+    box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);
+}
+
+#confirm-import-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(40, 167, 69, 0.4);
+}
+
+#cancel-import-btn {
+    background: #6c757d;
+    color: white;
+    box-shadow: 0 4px 15px rgba(108, 117, 125, 0.3);
+}
+
+#cancel-import-btn:hover {
+    background: #5a6268;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(108, 117, 125, 0.4);
+}
+
+/* Empty States */
+#jira-projects-list:empty::before,
+#jira-issues-list:empty::before,
+#jira-connections-list:empty::before {
+    content: 'No items found.';
+    display: block;
+    text-align: center;
+    padding: 3rem 2rem;
+    color: #666;
+    font-style: italic;
+    background: var(--card-bg);
+    border-radius: 12px;
+    border: 2px dashed var(--border-color);
+    grid-column: 1 / -1;
+}
+
+/* Loading States */
+.jira-project-card.loading,
+.jira-issue-card.loading {
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+.jira-project-card.loading::after,
+.jira-issue-card.loading::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+    animation: loadingShimmer 1.5s infinite;
+}
+
+/* Responsive Design for Jira Page */
+@media (max-width: 768px) {
+    #jira-page {
+        padding: 1rem;
+    }
+    
+    #jira-page .card {
+        padding: 1.5rem;
+    }
+    
+    #jira-projects-list {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+    
+    .jira-issue-card {
+        flex-direction: column;
+        gap: 1rem;
+    }
+    
+    .issue-header {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    
+    .issue-meta {
+        gap: 0.5rem;
+    }
+    
+    .import-btn {
+        width: 100%;
+        text-align: center;
+    }
+    
+    .modal-content {
+        padding: 1.5rem;
+        margin: 1rem;
+    }
+    
+    .modal-actions {
+        flex-direction: column;
+    }
+    
+    .modal-actions button {
+        width: 100%;
+    }
+}
+
+@media (max-width: 480px) {
+    #jira-page h2 {
+        font-size: 1.5rem;
+    }
+    
+    #jira-page .card h3 {
+        font-size: 1.3rem;
+    }
+    
+    .jira-project-card {
+        padding: 1.25rem;
+    }
+    
+    .jira-issue-card {
+        padding: 1.25rem;
+    }
+    
+    .issue-meta {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+}
+
+/* Success States */
+.connection-success {
+    border-left: 4px solid var(--success);
+}
+
+.import-success {
+    background: rgba(40, 167, 69, 0.1);
+    border-color: var(--success);
+}
+
+/* Error States */
+.connection-error {
+    border-left: 4px solid var(--danger);
+}
+
+.import-error {
+    background: rgba(220, 53, 69, 0.1);
+    border-color: var(--danger);
+}
+
+/* Status message styling */
+.typing-cursor {
+    display: inline-block;
+    animation: blink 1.2s infinite;
+    color: var(--primary);
+    font-weight: 600;
+    font-size: 0.95rem;
+    background: rgba(63, 13, 102, 0.1);
+    padding: 0.5rem 1rem;
+    border-radius: 12px;
+    border: 1px solid rgba(63, 13, 102, 0.2);
+    margin-bottom: 0.5rem;
+    display: inline-block;
+}
+
+/* Status container for multiple lines */
+.status-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+/* Make sure the status is visible during streaming */
+.assistant-bubble .typing-cursor {
+    background: rgba(63, 13, 102, 0.05);
+    border-left: 3px solid var(--primary);
+}
+
+
+
+/* ============================================= */
+/* ENHANCED MESSAGE ACTIONS - COPY, EDIT, REGENERATE */
+/* ============================================= */
+
+/* Message action buttons container */
+.message-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    justify-content: flex-end;
+    transition: opacity 0.2s ease;
+}
+
+/* User message actions alignment */
+.user-container .message-actions {
+    justify-content: flex-end;
+    opacity: 0;
+}
+.user-container:hover .message-actions {
+    opacity: 1;
+}
+
+/* Assistant message actions alignment */
+.assistant-container .message-actions {
+    justify-content: flex-start;
+    opacity: 1;
+}
+
+/* Message container that holds both bubble and actions */
+.message-container {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 0.5rem;
+}
+
+/* User message container alignment */
+.user-container {
+    align-self: flex-end;
+    margin-left: 20%;
+}
+
+/* Assistant message container alignment */
+.assistant-container {
+    align-self: flex-start;
+    margin-right: 0;
+}
+
+/* Base action button style */
+.action-btn {
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 0.4rem 0.75rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    color: var(--text);
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.action-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Specific button variants */
+.action-btn.copy:hover {
+    background: var(--success);
+    color: white;
+    border-color: var(--success);
+}
+
+.action-btn.edit:hover {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+.action-btn.regenerate:hover {
+    background: var(--secondary);
+    color: white;
+    border-color: var(--secondary);
+}
+
+.action-btn.stop-mode {
+    background: var(--danger);
+    color: white;
+    border-color: var(--danger);
+    animation: pulse 1.5s infinite;
+}
+
+/* Edit mode styles */
+.editable-message {
+    border: 2px solid var(--primary) !important;
+    background: var(--card-bg) !important;
+    padding: 1rem !important;
+    border-radius: 12px !important;
+    min-height: 80px;
+    resize: vertical;
+    width: 100%;
+    font-family: inherit;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    color: var(--text);
+    margin-bottom: 0.5rem;
+}
+
+.editable-message:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(63, 13, 102, 0.1);
+}
+
+.edit-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    justify-content: flex-end;
+}
+
+.edit-actions .action-btn {
+    font-size: 0.8rem;
+    padding: 0.5rem 1rem;
+}
+
+/* Stop generation animation */
+@keyframes pulse {
+    0% { 
+        transform: scale(1);
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+    }
+    50% { 
+        transform: scale(1.05);
+        box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+    }
+    100% { 
+        transform: scale(1);
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+    }
+}
+
+/* Copy feedback animation */
+.copy-feedback {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: var(--success);
+    color: white;
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    z-index: 10000;
+    animation: slideInRight 0.3s ease, fadeOut 0.3s ease 1.7s forwards;
+    box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
+}
+
+@keyframes slideInRight {
+    from {
+        opacity: 0;
+        transform: translateX(100%);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes fadeOut {
+    to {
+        opacity: 0;
+    }
+}
+
+/* Enhanced code block copy button */
+.assistant-bubble pre {
+    position: relative;
+}
+
+.pre-copy-btn {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    padding: 0.4rem 0.75rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    color: var(--text);
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    backdrop-filter: blur(10px);
+    opacity: 0;
+    transform: translateY(-5px);
+}
+
+.assistant-bubble pre:hover .pre-copy-btn {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.pre-copy-btn:hover {
+    background: var(--success);
+    color: white;
+    border-color: var(--success);
+}
+
+/* Regeneration indicator */
+.regeneration-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    background: rgba(63, 13, 102, 0.1);
+    border: 1px solid rgba(63, 13, 102, 0.2);
+    border-radius: 8px;
+    margin-bottom: 1rem;
+    color: var(--primary);
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.regeneration-indicator i {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Responsive design for message actions */
+@media (max-width: 768px) {
+    .message-actions {
+        opacity: 1; /* Always show on mobile */
+        gap: 0.3rem;
+    }
+    
+    .action-btn {
+        padding: 0.3rem 0.6rem;
+        font-size: 0.75rem;
+    }
+    
+    .pre-copy-btn {
+        opacity: 1; /* Always show on mobile */
+        transform: translateY(0);
+    }
+}
+
+
+/* Fixed Sidebar Solution */
+#sidebar {
+    width: 250px;
+    min-width: 250px; /* Prevent shrinking */
+    max-width: 250px; /* Prevent expanding */
+    background: var(--card-bg);
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    padding: 1rem;
+    flex-shrink: 0; /* Crucial - prevents shrinking */
+}
+
+#app-wrapper {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    min-width: 0; /* Allow main content to shrink instead */
+}
+
+#main-content {
+    flex-grow: 1;
+    padding: 2rem;
+    overflow-y: auto;
+    height: 100vh;
+    min-width: 0; /* Allow this to handle overflow */
+}
+/* More prominent regeneration indicator */
+.regeneration-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem 1.5rem;
+    background: linear-gradient(135deg, #3F0D66 0%, #6a1b9a 100%);
+    color: white;
+    border-radius: 12px;
+    margin: 1rem 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    text-align: center;
+    justify-content: center;
+    box-shadow: 0 4px 12px rgba(63, 13, 102, 0.3);
+    border: none;
+    max-width: 300px;
+    align-self: center;
+}
+
+.regeneration-indicator i {
+    animation: spin 1s linear infinite;
+    color: white;
+    font-size: 1.1rem;
+}
+
+/* Pulse animation for attention */
+.regeneration-indicator {
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% {
+        box-shadow: 0 4px 12px rgba(63, 13, 102, 0.3);
+    }
+    50% {
+        box-shadow: 0 4px 20px rgba(63, 13, 102, 0.5);
+    }
+    100% {
+        box-shadow: 0 4px 12px rgba(63, 13, 102, 0.3);
     }
 }
