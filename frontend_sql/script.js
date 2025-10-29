@@ -6,6 +6,10 @@ document.addEventListener('DOMContentLoaded', () => {
         projects: [], selectedProjectId: null, selectedProjectName: null,
         chatHistory: {}, conversationId: {}, charts: {},
     };
+    state.jiraConnections = [];
+    state.currentJiraConnection = null;
+    state.jiraProjects = [];
+    state.jiraIssues = [];
 
     const $ = (selector) => document.querySelector(selector);
     const $$ = (selector) => document.querySelectorAll(selector);
@@ -71,6 +75,7 @@ document.addEventListener('DOMContentLoaded', () => {
         case 'query': loadProjectsForQueryPage(); break;
         case 'query_history': loadProjectsForHistoryPage(); break;
         case 'analytics': loadAnalyticsData(); break;
+        case 'jira': loadJiraConnections(); loadProjectsForJiraImport(); break;
     }
 }
     const showLoader = (isLoading) => $('#loader').style.display = isLoading ? 'flex' : 'none';
@@ -135,8 +140,46 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         $('#history-project-selector').addEventListener('change', loadConversationsForHistory);
         $('#history-conversation-selector').addEventListener('change', renderConversationTranscript);
+        $('#jira-connect-form').addEventListener('submit', handleJiraConnect);
+        $('#jira-connection-selector').addEventListener('change', loadJiraProjects);
+        $('#confirm-import-btn').addEventListener('click', confirmJiraImport);
+        $('#cancel-import-btn').addEventListener('click', () => $('#jira-import-modal').style.display = 'none');
+
     }
     
+
+    async function handleJiraCreateProject() {
+        const newProjectName = $('#new-project-name-input').value.trim();
+        if (!newProjectName) {
+            showError('Please enter a project name', '#main-error'); // Changed from '#auth-error'
+            return;
+        }
+
+        try {
+            // Use the existing create project endpoint
+            const result = await apiRequest('/project', { 
+                method: 'POST', 
+                body: JSON.stringify({ project_name: newProjectName }) 
+            });
+            
+            // Update the projects list and select the newly created project
+            await loadProjectsForJiraImport();
+            
+            // Switch to existing project option and select the new project
+            $('input[name="import-option"][value="existing"]').checked = true;
+            $('#new-project-section').style.display = 'none';
+            $('#existing-projects-select').style.display = 'block';
+            $('#existing-projects-select').value = result.project_id;
+            
+            $('#new-project-name-input').value = '';
+            
+            showError('✅ Project created successfully!', '#main-error'); // Changed from '#auth-error'
+            
+        } catch (error) {
+            showError(`Failed to create project: ${error.message}`, '#main-error'); // Changed from '#auth-error'
+        }
+    }
+
     // Auth Handlers
     async function handleLogin(e) {
         e.preventDefault();
@@ -275,15 +318,24 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         // Render existing chat history
-        history.forEach(msg => { 
-            const bubble = document.createElement('div'); 
-            bubble.className = `chat-bubble ${msg.role}-bubble`; 
-            bubble.innerHTML = marked.parse(msg.content); 
-            messagesContainer.appendChild(bubble); 
-            if (msg.role === 'assistant') addFeedbackSection(bubble, msg); 
-        }); 
-        $('#chat-container').scrollTop = $('#chat-container').scrollHeight; 
-        enhanceCodeBlocks();
+        history.forEach(msg => {
+        const messageDiv = renderEnhancedMessage(msg.content, msg.role, msg.messageId);
+        
+        // Store message ID in state for reference
+        if (!msg.messageId) {
+            msg.messageId = messageDiv.id;
+        }
+        
+        messagesContainer.appendChild(messageDiv);
+        
+        // Add feedback section for assistant messages
+        if (msg.role === 'assistant') {
+            addFeedbackSection(messageDiv, msg);
+        }
+        });
+
+        setTimeout(autoScrollToBottom, 100);
+        enhanceCodeBlocksInContainer(messagesContainer);
     }
     function enhanceCodeBlocks() {
         // Select all code blocks inside assistant messages
@@ -311,7 +363,232 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    async function handleChatSubmit(e) { e.preventDefault(); const input = $('#chat-input'); const query = input.value.trim(); if (!query || !state.selectedProjectId) return; const projId = state.selectedProjectId; if (!state.chatHistory[projId]) state.chatHistory[projId] = []; state.chatHistory[projId].push({ role: 'user', content: query }); renderChatHistory(); input.value = ''; const assistantBubble = document.createElement('div'); assistantBubble.className = 'chat-bubble assistant-bubble'; assistantBubble.innerHTML = '<span class="typing-cursor">Thinking...</span>'; $('#chat-messages').appendChild(assistantBubble); $('#chat-container').scrollTop = $('#chat-container').scrollHeight; try { const response = await apiRequest('/chat', { method: 'POST', stream: true, body: JSON.stringify({ project_id: parseInt(projId), query: query, conversation_id: state.conversationId[projId] || null, }), }); const reader = response.body.getReader(); const decoder = new TextDecoder(); let fullResponse = ""; let metaData = {}; while (true) { const { done, value } = await reader.read(); if (done) break; let chunk = decoder.decode(value, { stream: true }); if (chunk.includes("[[[META]]]")) { const parts = chunk.split("[[[META]]]"); chunk = parts[0]; metaData = JSON.parse(parts[1]); console.log('🔍 META DATA RECEIVED:', metaData); } fullResponse += chunk; assistantBubble.innerHTML = marked.parse(fullResponse + " ▌"); $('#chat-container').scrollTop = $('#chat-container').scrollHeight; } assistantBubble.innerHTML = marked.parse(fullResponse); const assistantMessage = { role: 'assistant', content: fullResponse, user_query: query, query_id: metaData.query_id, contexts: metaData.contexts }; console.log('Assistant message created:', assistantMessage); state.chatHistory[projId].push(assistantMessage); if (metaData.conversation_id) {state.conversationId[projId] = metaData.conversation_id;} addFeedbackSection(assistantBubble, assistantMessage); } catch (error) { assistantBubble.innerHTML = `Error: ${error.message}`; assistantBubble.style.color = 'red'; } enhanceCodeBlocks();}
+    async function handleChatSubmit(e, isRegeneration = false) {
+        if (e) e.preventDefault();
+        
+        const input = $('#chat-input');
+        const query = input.value.trim();
+        
+        if (!query || !state.selectedProjectId) return;
+        
+        const projId = state.selectedProjectId;
+        
+        // Initialize chat history if needed
+        if (!state.chatHistory[projId]) {
+            state.chatHistory[projId] = [];
+        }
+        
+        // Add user message to history
+        const userMessage = {
+            role: 'user',
+            content: query,
+            messageId: `msg-${Date.now()}-user-${Math.random().toString(36).substr(2, 5)}`
+        };
+        
+        state.chatHistory[projId].push(userMessage);
+        
+        // Render user message with actions
+        const userMessageDiv = renderEnhancedMessage(query, 'user', userMessage.messageId);
+        $('#chat-messages').appendChild(userMessageDiv);
+        
+        input.value = '';
+        
+        // SCROLL: After user message is added
+        autoScrollToBottom();
+        
+        // Create assistant message placeholder
+        const assistantMessageId = `msg-${Date.now()}-assistant-${Math.random().toString(36).substr(2, 5)}`;
+        const assistantBubble = document.createElement('div');
+        assistantBubble.className = 'chat-bubble assistant-bubble';
+        assistantBubble.id = assistantMessageId;
+        
+        let currentStatus = "🚀 Starting processing...";
+        assistantBubble.innerHTML = `
+            <div class="message-content">
+                <span class="typing-cursor">${currentStatus}</span>
+            </div>
+        `;
+        
+        $('#chat-messages').appendChild(assistantBubble);
+        
+        // SCROLL: After assistant placeholder is created
+        autoScrollToBottom();
+        
+        // Add timeout handling
+        const TIMEOUT_MS = 45000; // 45 seconds
+        let responseComplete = false;
+        const timeoutId = setTimeout(() => {
+            if (!responseComplete) {
+                currentStatus = "⚠️ Taking longer than expected...";
+                const messageContent = assistantBubble.querySelector('.message-content');
+                if (messageContent) {
+                    messageContent.innerHTML = `<span class="typing-cursor">${currentStatus}</span>`;
+                }
+                $('#chat-container').scrollTop = $('#chat-container').scrollHeight;
+            }
+        }, TIMEOUT_MS);
+
+        try {
+            const response = await apiRequest('/chat', {
+                method: 'POST',
+                stream: true,
+                body: JSON.stringify({
+                    project_id: parseInt(projId),
+                    query: query,
+                    conversation_id: state.conversationId[projId] || null,
+                }),
+            });
+            
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let fullResponse = "";
+            let metaData = {};
+            
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                let chunk = decoder.decode(value, { stream: true });
+                
+                // Handle status updates
+                if (chunk.includes("[[[STATUS]]]")) {
+                    currentStatus = chunk.replace("[[[STATUS]]]", "").trim();
+                    // Update with status only or status + partial response
+                    const messageContent = assistantBubble.querySelector('.message-content');
+                    if (messageContent) {
+                        if (fullResponse) {
+                            messageContent.innerHTML = `
+                                <div class="status-container">
+                                    <span class="typing-cursor">${currentStatus}</span>
+                                    <div style="margin-top: 10px; opacity: 0.8;">${marked.parse(fullResponse + " ▌")}</div>
+                                </div>
+                            `;
+                        } else {
+                            messageContent.innerHTML = `<span class="typing-cursor">${currentStatus}</span>`;
+                        }
+                    }
+                    $('#chat-container').scrollTop = $('#chat-container').scrollHeight;
+                    continue;
+                }
+                
+                // Handle metadata
+                if (chunk.includes("[[[META]]]")) {
+                    const parts = chunk.split("[[[META]]]");
+                    chunk = parts[0];
+                    try {
+                        metaData = JSON.parse(parts[1]);
+                    } catch (e) {
+                        console.error('Failed to parse metadata:', e);
+                    }
+                }
+                
+                fullResponse += chunk;
+                
+                // Update with both status and accumulated response
+                const messageContent = assistantBubble.querySelector('.message-content');
+                if (messageContent) {
+                    messageContent.innerHTML = `
+                        <div class="status-container">
+                            <span class="typing-cursor">${currentStatus}</span>
+                            <div style="margin-top: 10px; opacity: 0.8;">${marked.parse(fullResponse + " ▌")}</div>
+                        </div>
+                    `;
+                }
+                
+                $('#chat-container').scrollTop = $('#chat-container').scrollHeight;
+            }
+            
+            // Clear timeout and mark as complete
+            clearTimeout(timeoutId);
+            responseComplete = true;
+
+            // Final update - remove status and show only the response with actions
+            assistantBubble.innerHTML = `
+                <div class="message-content">${marked.parse(fullResponse)}</div>
+                <div class="message-actions">
+                    <button class="action-btn copy" title="Copy message content">
+                        <i class="fas fa-copy"></i> Copy
+                    </button>
+                </div>
+            `;
+            
+            // Attach copy functionality
+            const copyBtn = assistantBubble.querySelector('.action-btn.copy');
+            if (copyBtn) {
+                copyBtn.addEventListener('click', () => {
+                    const content = extractTextContent(assistantBubble);
+                    if (content && content.trim()) {
+                        copyToClipboard(content);
+                        showCopyFeedback(copyBtn);
+                    }
+                });
+            }
+            
+            enhanceCodeBlocks(assistantBubble);
+            
+            // Add to chat history
+            const assistantMessage = {
+                role: 'assistant',
+                content: fullResponse,
+                user_query: query,
+                query_id: metaData.query_id,
+                contexts: metaData.contexts,
+                messageId: assistantMessageId
+            };
+            
+            state.chatHistory[projId].push(assistantMessage);
+            
+            if (metaData.conversation_id) {
+                state.conversationId[projId] = metaData.conversation_id;
+            }
+            
+            addFeedbackSection(assistantBubble, assistantMessage);
+            
+            // SCROLL: Final scroll after complete response
+            autoScrollToBottom();
+            
+        } catch (error) {
+            // Clear timeout on error
+            clearTimeout(timeoutId);
+            responseComplete = true;
+            
+            // Show error message with copy button
+            assistantBubble.innerHTML = `
+                <div class="message-content" style="color: var(--danger);">
+                    <strong>Error:</strong> ${error.message}
+                </div>
+                <div class="message-actions">
+                    <button class="action-btn copy" title="Copy error message">
+                        <i class="fas fa-copy"></i> Copy
+                    </button>
+                </div>
+            `;
+            
+            const copyBtn = assistantBubble.querySelector('.action-btn.copy');
+            if (copyBtn) {
+                copyBtn.addEventListener('click', () => {
+                    const content = `Error: ${error.message}`;
+                    copyToClipboard(content);
+                    showCopyFeedback(copyBtn);
+                });
+            }
+            
+            // Add error to chat history for continuity
+            const errorMessage = {
+                role: 'assistant',
+                content: `Error: ${error.message}`,
+                user_query: query,
+                messageId: assistantMessageId
+            };
+            state.chatHistory[projId].push(errorMessage);
+            
+            // SCROLL: Even on error
+            autoScrollToBottom();
+        }
+        
+        removeRegenerationIndicator(userMessageDiv);
+    }
+
     function addFeedbackSection(bubble, message) { 
         console.log('Message in addFeedbackSection:', message); // DEBUG
         console.log('Contexts in addFeedbackSection:', message.contexts); // DEBUG
@@ -366,10 +643,39 @@ document.addEventListener('DOMContentLoaded', () => {
         feedbackDiv.querySelectorAll('.feedback-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const feedbackType = e.target.dataset.type;
-                // ... same code as above to show comment section
+                
+                // Show comment input for detailed feedback
+                feedbackDiv.innerHTML = `
+                    <div class="feedback-comment-section">
+                        <span class="feedback-thanks">Thanks! Any additional comments?</span>
+                        <textarea class="feedback-comment" placeholder="Optional: Share your thoughts about the SQL query..."></textarea>
+                        <div class="feedback-actions">
+                            <button class="feedback-submit-btn" data-type="${feedbackType}">Submit Feedback</button>
+                            <button class="feedback-cancel-btn">Cancel</button>
+                        </div>
+                    </div>
+                `;
+                
+                // Submit feedback with comment
+                feedbackDiv.querySelector('.feedback-submit-btn').addEventListener('click', () => {
+                    const comment = feedbackDiv.querySelector('.feedback-comment').value;
+                    submitEnhancedFeedback(message, feedbackType, comment);
+                    feedbackDiv.innerHTML = '<span class="feedback-thanks">Thanks for your feedback!</span>';
+                });
+                
+                // Cancel feedback
+                feedbackDiv.querySelector('.feedback-cancel-btn').addEventListener('click', () => {
+                    feedbackDiv.innerHTML = `
+                        <span class="feedback-text">Was this helpful?</span>
+                        <button class="feedback-btn" data-type="up">👍</button>
+                        <button class="feedback-btn" data-type="down">👎</button>
+                    `;
+                    attachFeedbackListeners(feedbackDiv, message);
+                });
             });
         });
     }
+    
     async function submitFeedback(msg, feedbackType, comment = "") {
         try {
             console.log('Before submit - msg.contexts:', msg.contexts);
@@ -978,6 +1284,733 @@ document.addEventListener('DOMContentLoaded', () => {
         e.target.classList.add('active');
         parent.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
         parent.querySelector(`#${e.target.dataset.tab}-tab-content`).style.display = 'block';
+    }
+
+    
+    // =============================================
+// ENHANCED MESSAGE ACTIONS - COPY, EDIT, REGENERATE
+// =============================================
+
+
+
+/**
+ * Enhanced code block enhancement with copy buttons
+ */
+function enhanceCodeBlocks(messageDiv) {
+    const codeBlocks = messageDiv.querySelectorAll('pre');
+    
+    codeBlocks.forEach(pre => {
+        // Skip if already has copy button
+        if (pre.querySelector('.pre-copy-btn')) return;
+        
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'pre-copy-btn';
+        copyBtn.innerHTML = '<i class="fas fa-copy"></i> Copy';
+        copyBtn.title = 'Copy code';
+        
+        copyBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const code = pre.querySelector('code')?.textContent || pre.textContent;
+            copyToClipboard(code);
+            showCopyFeedback(copyBtn);
+        });
+        
+        pre.appendChild(copyBtn);
+    });
+}
+
+/**
+ * Enable editing for a user message
+ */
+function enableMessageEditing(messageDiv, originalContent) {
+    const contentDiv = messageDiv.querySelector('.message-content');
+    if (!contentDiv) return;
+
+    // Replace content with editable textarea
+    const textarea = document.createElement('textarea');
+    textarea.className = 'editable-message';
+    textarea.value = originalContent;
+    textarea.rows = 3;
+    
+    contentDiv.parentNode.replaceChild(textarea, contentDiv);
+    
+    // Transform action buttons
+    const editBtn = messageDiv.querySelector('.action-btn.edit');
+    const regenerateBtn = messageDiv.querySelector('.action-btn.regenerate');
+    const copyBtn = messageDiv.querySelector('.action-btn.copy');
+    
+    if (editBtn) {
+        editBtn.innerHTML = '<i class="fas fa-check"></i> Save';
+        editBtn.title = 'Save changes';
+        editBtn.classList.add('save-mode');
+        
+        // Replace button to clear events
+        const newEditBtn = editBtn.cloneNode(true);
+        editBtn.parentNode.replaceChild(newEditBtn, editBtn);
+        
+        newEditBtn.addEventListener('click', () => {
+            saveEditedMessage(messageDiv, textarea.value);
+        });
+    }
+
+    // Hide other buttons during editing
+    if (regenerateBtn) regenerateBtn.style.display = 'none';
+    if (copyBtn) copyBtn.style.display = 'none';
+    
+    // Add edit actions container
+    const editActions = document.createElement('div');
+    editActions.className = 'edit-actions';
+    editActions.innerHTML = `
+        <button class="action-btn cancel-edit">
+            <i class="fas fa-times"></i> Cancel
+        </button>
+    `;
+    
+    messageDiv.querySelector('.message-actions').appendChild(editActions);
+    
+    // Cancel edit handler
+    editActions.querySelector('.cancel-edit').addEventListener('click', () => {
+        cancelMessageEditing(messageDiv, originalContent);
+    });
+    
+    // Keyboard shortcuts
+    textarea.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            cancelMessageEditing(messageDiv, originalContent);
+        } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            saveEditedMessage(messageDiv, textarea.value);
+        }
+    });
+    
+    // Focus and select
+    textarea.focus();
+    textarea.select();
+}
+
+/**
+ * Save edited message and regenerate response
+ */
+async function saveEditedMessage(messageDiv, newContent) {
+    if (!newContent.trim()) {
+        showError('Message cannot be empty', '#main-error');
+        return;
+    }
+
+    const messageId = messageDiv.id;
+    const projectId = state.selectedProjectId;
+    
+    if (!projectId) {
+        showError('Please select a project first', '#main-error');
+        return;
+    }
+
+    // Update the message in chat history
+    const messageIndex = findMessageIndexInHistory(projectId, messageId);
+    if (messageIndex !== -1) {
+        state.chatHistory[projectId][messageIndex].content = newContent;
+        state.chatHistory[projectId][messageIndex].isEdited = true;
+    }
+
+    // Restore message display
+    restoreMessageDisplay(messageDiv, newContent);
+
+    // Trigger regeneration
+    await regenerateResponse(messageDiv, newContent);
+}
+
+/**
+ * Cancel message editing and restore original
+ */
+function cancelMessageEditing(messageDiv, originalContent) {
+    restoreMessageDisplay(messageDiv, originalContent);
+}
+
+/**
+ * Restore message display after editing
+ */
+function restoreMessageDisplay(messageDiv, content) {
+    // Remove edit actions
+    const editActions = messageDiv.querySelector('.edit-actions');
+    if (editActions) editActions.remove();
+    
+    // Remove textarea and restore content div
+    const textarea = messageDiv.querySelector('.editable-message');
+    if (textarea) {
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content';
+        contentDiv.innerHTML = marked.parse(escapeHtml(content));
+        
+        textarea.parentNode.replaceChild(contentDiv, textarea);
+    }
+    
+    // Restore action buttons
+    const messageActions = messageDiv.querySelector('.message-actions');
+    messageActions.innerHTML = `
+        <button class="action-btn edit" title="Edit message"><i class="fas fa-edit"></i></button>
+        <button class="action-btn regenerate" title="Regenerate response"><i class="fas fa-sync-alt"></i></button>
+        <button class="action-btn copy" title="Copy message"><i class="fas fa-copy"></i></button>
+    `;
+    
+    // Re-attach event handlers
+    attachMessageActions(messageDiv, 'user', content);
+}
+
+/**
+ * Regenerate response for a message
+ */
+/**
+ * Regenerate response for a message
+ */
+async function regenerateResponse(messageDiv, content) {
+    const projectId = state.selectedProjectId;
+    if (!projectId) {
+        showError('Please select a project first', '#main-error');
+        return;
+    }
+
+    // Find and remove subsequent messages (to regenerate from this point)
+    const messageId = messageDiv.id;
+    removeSubsequentMessages(projectId, messageId);
+    
+    // Add regeneration indicator
+    addRegenerationIndicator(messageDiv);
+    
+    // SCROLL: After adding regeneration indicator
+    autoScrollToBottom();
+    
+    // Send the message again
+    await sendMessageForRegeneration(content, projectId);
+    
+    // Remove regeneration indicator after completion
+    removeRegenerationIndicator(messageDiv);
+}
+/**
+ * Find message index in chat history
+ */
+function findMessageIndexInHistory(projectId, messageId) {
+    if (!state.chatHistory[projectId]) return -1;
+    
+    return state.chatHistory[projectId].findIndex(msg => 
+        msg.messageId === messageId || msg.elementId === messageId
+    );
+}
+
+/**
+ * Remove subsequent messages from history
+ */
+function removeSubsequentMessages(projectId, messageId) {
+    if (!state.chatHistory[projectId]) return;
+    
+    const messageIndex = findMessageIndexInHistory(projectId, messageId);
+    if (messageIndex !== -1) {
+        state.chatHistory[projectId] = state.chatHistory[projectId].slice(0, messageIndex + 1);
+    }
+}
+
+/**
+ * Add regeneration indicator
+ */
+function addRegenerationIndicator(messageDiv) {
+    const existingIndicator = messageDiv.querySelector('.regeneration-indicator');
+    if (existingIndicator) return;
+    
+    const indicator = document.createElement('div');
+    indicator.className = 'regeneration-indicator';
+    indicator.innerHTML = '<i class="fas fa-sync-alt"></i> Regenerating response...';
+    
+    messageDiv.appendChild(indicator);
+}
+
+/**
+ * Remove regeneration indicator
+ */
+function removeRegenerationIndicator(messageDiv) {
+    const indicator = messageDiv.querySelector('.regeneration-indicator');
+    if (indicator) {
+        indicator.remove();
+    }
+}
+
+/**
+ * Send message for regeneration
+ */
+async function sendMessageForRegeneration(content, projectId) {
+    const input = $('#chat-input');
+    const originalValue = input.value;
+    
+    // Set input value and trigger send
+    input.value = content;
+    
+    try {
+        await handleChatSubmit(new Event('submit'), true);
+    } catch (error) {
+        console.error('Regeneration failed:', error);
+        showError('Failed to regenerate response', '#main-error');
+    } finally {
+        // Restore input value
+        input.value = originalValue;
+    }
+}
+
+/**
+ * Copy to clipboard with enhanced feedback
+ */
+function copyToClipboard(text) {
+    if (!text.trim()) return;
+    
+    navigator.clipboard.writeText(text).then(() => {
+        console.log('Text copied to clipboard');
+    }).catch(err => {
+        console.error('Failed to copy text: ', err);
+        // Fallback for older browsers
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+    });
+}
+
+/**
+ * Show copy feedback animation
+ */
+function showCopyFeedback(button) {
+    const feedback = document.createElement('div');
+    feedback.className = 'copy-feedback';
+    feedback.textContent = 'Copied!';
+    
+    document.body.appendChild(feedback);
+    
+    // Remove after animation
+    setTimeout(() => {
+        if (feedback.parentNode) {
+            feedback.remove();
+        }
+    }, 2000);
+}
+
+/**
+ * Escape HTML to prevent XSS
+ */
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+
+/**
+ * Enhance all code blocks in a container
+ */
+function enhanceCodeBlocksInContainer(container) {
+    const codeBlocks = container.querySelectorAll('.assistant-bubble pre');
+    
+    codeBlocks.forEach(pre => {
+        if (pre.querySelector('.pre-copy-btn')) return;
+        
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'pre-copy-btn';
+        copyBtn.innerHTML = '<i class="fas fa-copy"></i> Copy';
+        copyBtn.title = 'Copy code';
+        
+        copyBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const code = pre.querySelector('code')?.textContent || pre.textContent;
+            copyToClipboard(code);
+            showCopyFeedback(copyBtn);
+        });
+        
+        pre.appendChild(copyBtn);
+    });
+}
+
+/**
+ * FIXED: Extract text content from message div (handles both plain text and HTML)
+ */
+function extractTextContent(messageDiv) {
+    const contentDiv = messageDiv.querySelector('.message-content');
+    if (!contentDiv) return '';
+    
+    // For assistant messages with HTML content, get the text representation
+    if (contentDiv.innerHTML !== contentDiv.textContent) {
+        // Create a temporary div to extract text from HTML
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = contentDiv.innerHTML;
+        return tempDiv.textContent || tempDiv.innerText || '';
+    }
+    
+    // For plain text, return directly
+    return contentDiv.textContent || contentDiv.innerText || '';
+}
+
+/**
+ * FIXED: Enhanced message rendering with PROPER action buttons
+ */
+function renderEnhancedMessage(message, role, messageId = null) {
+    // Create main container that holds both bubble and actions
+    const messageContainer = document.createElement('div');
+    messageContainer.className = `message-container ${role}-container`;
+    
+    if (messageId) {
+        messageContainer.id = messageId;
+    } else {
+        messageContainer.id = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    }
+
+    // Use marked.parse for assistant messages, escapeHtml for user messages
+    const content = role === 'assistant' ? marked.parse(message) : escapeHtml(message);
+    
+    // Create bubble (just the message content)
+    const bubble = document.createElement('div');
+    bubble.className = `chat-bubble ${role}-bubble`;
+    bubble.innerHTML = `<div class="message-content">${content}</div>`;
+    
+    // Create actions (separate element outside the bubble)
+    const actions = document.createElement('div');
+    actions.className = 'message-actions';
+    actions.innerHTML = `
+        ${role === 'user' ? `
+            <button class="action-btn edit" title="Edit message">
+                <i class="fas fa-edit"></i>
+            </button>
+            <button class="action-btn regenerate" title="Regenerate response">
+                <i class="fas fa-sync-alt"></i>
+            </button>
+        ` : ''}
+        <button class="action-btn copy" title="Copy message content">
+            <i class="fas fa-copy"></i>
+        </button>
+    `;
+
+    // Assemble the container
+    messageContainer.appendChild(bubble);
+    messageContainer.appendChild(actions);
+
+    // Attach action handlers to the container (not the bubble)
+    attachMessageActions(messageContainer, role, message);
+
+    return messageContainer;
+}
+
+/**
+ * FIXED: Attach event handlers to message action buttons
+ */
+function attachMessageActions(messageDiv, role, originalContent) {
+    const messageId = messageDiv.id;
+    
+    // Copy functionality - WORKS FOR ALL MESSAGES
+    const copyBtn = messageDiv.querySelector('.action-btn.copy');
+    if (copyBtn) {
+        copyBtn.addEventListener('click', () => {
+            const content = extractTextContent(messageDiv);
+            if (content && content.trim()) {
+                copyToClipboard(content);
+                showCopyFeedback(copyBtn);
+            } else {
+                console.warn('No content to copy from message:', messageDiv);
+            }
+        });
+    }
+
+    // Edit functionality (user messages only)
+    if (role === 'user') {
+        const editBtn = messageDiv.querySelector('.action-btn.edit');
+        if (editBtn) {
+            editBtn.addEventListener('click', () => {
+                enableMessageEditing(messageDiv, originalContent);
+            });
+        }
+
+        // Regenerate functionality
+        const regenerateBtn = messageDiv.querySelector('.action-btn.regenerate');
+        if (regenerateBtn) {
+            regenerateBtn.addEventListener('click', () => {
+                regenerateResponse(messageDiv, originalContent);
+            });
+        }
+    }
+
+    // Enhanced code block copy buttons for assistant messages (BONUS)
+    if (role === 'assistant') {
+        enhanceCodeBlocks(messageDiv);
+    }
+}
+
+function autoScrollToBottom() {
+    const chatContainer = $('#chat-container');
+    if (chatContainer) {
+        // Small delay to ensure DOM is updated
+        setTimeout(() => {
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }, 10);
+        
+        // Additional scroll after a bit more time for stubborn cases
+        setTimeout(() => {
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }, 100);
+    }
+}
+
+
+    // Jira connection handlers
+   async function handleJiraConnect(e) {
+        e.preventDefault(); // This is crucial to prevent form submission navigation
+        
+        const formData = {
+            jira_url: $('#jira-url').value,
+            username: $('#jira-username').value,
+            api_token: $('#jira-api-token').value,
+            is_default: $('#jira-is-default').checked
+        };
+
+        // Basic validation
+        if (!formData.jira_url || !formData.username || !formData.api_token) {
+            showError('Please fill in all Jira connection fields', '#auth-error');
+            return;
+        }
+
+        try {
+            const result = await apiRequest('/jira/connect', {
+                method: 'POST',
+                body: JSON.stringify(formData)
+            });
+            
+            // Clear form and show success
+            $('#jira-connect-form').reset();
+            showError('✅ Successfully connected to Jira!', '#auth-error');
+            
+            // Reload connections and show browser
+            await loadJiraConnections();
+            
+        } catch (error) {
+            showError(`❌ Connection failed: ${error.message}`, '#auth-error');
+        }
+    }
+
+    async function loadJiraConnections() {
+        try {
+            state.jiraConnections = await apiRequest('/jira/connections');
+            renderJiraConnections();
+            
+            if (state.jiraConnections.length > 0) {
+                $('#jira-browser').style.display = 'block';
+                renderJiraConnectionSelector();
+            }
+        } catch (error) {
+            console.error('Failed to load Jira connections:', error);
+        }
+    }
+
+    function renderJiraConnections() {
+        const container = $('#jira-connections-list');
+        if (state.jiraConnections.length === 0) {
+            container.innerHTML = '<p style="color: #666; font-style: italic;">No Jira connections found. Add one above.</p>';
+            return;
+        }
+
+        container.innerHTML = state.jiraConnections.map(conn => `
+            <div class="connection-item" style="border: 1px solid var(--border-color); padding: 1rem; margin: 0.5rem 0; border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <strong>${conn.jira_url}</strong><br>
+                        <small>User: ${conn.username}</small>
+                    </div>
+                    <div>
+                        ${conn.is_default ? '<span style="background: var(--success); color: white; padding: 0.2rem 0.5rem; border-radius: 12px; font-size: 0.8rem;">Default</span>' : ''}
+                    </div>
+                </div>
+                <small style="color: #666;">Connected: ${new Date(conn.created_at).toLocaleDateString()}</small>
+            </div>
+        `).join('');
+    }
+
+    function renderJiraConnectionSelector() {
+        const selector = $('#jira-connection-selector');
+        selector.innerHTML = '<option value="">Select Jira Connection</option>' +
+            state.jiraConnections.map(conn => 
+                `<option value="${conn.id}">${conn.jira_url} (${conn.username})${conn.is_default ? ' - Default' : ''}</option>`
+            ).join('');
+        
+        // Auto-select the default connection if available
+        const defaultConnection = state.jiraConnections.find(conn => conn.is_default);
+        if (defaultConnection) {
+            selector.value = defaultConnection.id;
+            // Trigger change to load projects automatically
+            selector.dispatchEvent(new Event('change'));
+        }
+    }
+
+    async function loadJiraProjects() {
+        const connectionId = $('#jira-connection-selector').value;
+        if (!connectionId) return;
+
+        try {
+            state.jiraProjects = await apiRequest(`/jira/projects?connection_id=${connectionId}`);
+            renderJiraProjects();
+            state.currentJiraConnection = connectionId;
+        } catch (error) {
+            showError(error.message, '#auth-error');
+        }
+    }
+
+    function renderJiraProjects() {
+        const container = $('#jira-projects-list');
+        if (state.jiraProjects.length === 0) {
+            container.innerHTML = '<p>No projects found in Jira.</p>';
+            return;
+        }
+
+        container.innerHTML = state.jiraProjects.map(project => `
+            <div class="jira-project-card" data-key="${project.key}">
+                <h4>${project.name}</h4>
+                <p>${project.key} - ${project.description || 'No description'}</p>
+            </div>
+        `).join('');
+
+        // Add click handlers
+        $$('.jira-project-card').forEach(card => {
+            card.addEventListener('click', () => loadJiraIssues(card.dataset.key));
+        });
+    }
+
+    async function loadJiraIssues(projectKey) {
+        if (!state.currentJiraConnection) return;
+
+        try {
+            state.jiraIssues = await apiRequest(
+                `/jira/issues?connection_id=${state.currentJiraConnection}&project_key=${projectKey}`
+            );
+            renderJiraIssues();
+            $('#current-project-name').textContent = projectKey;
+            $('#jira-issues-section').style.display = 'block';
+        } catch (error) {
+            showError(error.message, '#auth-error');
+        }
+    }
+
+    function renderJiraIssues() {
+        const container = $('#jira-issues-list');
+        if (state.jiraIssues.length === 0) {
+            container.innerHTML = '<p>No issues found in this project.</p>';
+            return;
+        }
+
+        container.innerHTML = state.jiraIssues.map(issue => `
+            <div class="jira-issue-card">
+                <div class="issue-content">
+                    <div class="issue-header">
+                        <span class="issue-key">${issue.key}</span>
+                        <span class="issue-summary">${issue.summary}</span>
+                    </div>
+                    <div class="issue-meta">
+                        <span>Type: ${issue.issue_type}</span>
+                        <span>Status: ${issue.status}</span>
+                        <span>Assignee: ${issue.assignee}</span>
+                        <span>Attachments: ${issue.attachments.length}</span>
+                    </div>
+                </div>
+                <button class="import-btn" data-issue='${JSON.stringify(issue).replace(/'/g, "&apos;")}'>
+                    Import
+                </button>
+            </div>
+        `).join('');
+
+        // Add import button handlers
+        $$('.import-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const issue = JSON.parse(btn.dataset.issue.replace(/&apos;/g, "'"));
+                showImportModal(issue);
+            });
+        });
+    }
+
+    function showImportModal(issue) {
+        state.selectedJiraIssue = issue;
+        $('#import-issue-key').textContent = issue.key;
+        $('#jira-import-modal').style.display = 'flex';
+        
+        // Set up radio button handlers when modal is shown
+        $$('input[name="import-option"]').forEach(radio => {
+            // Remove any existing listeners first
+            radio.replaceWith(radio.cloneNode(true));
+        });
+        
+        // Re-select the elements and add fresh listeners
+        $$('input[name="import-option"]').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                const showNewProject = e.target.value === 'new';
+                $('#new-project-section').style.display = showNewProject ? 'block' : 'none';
+                $('#existing-projects-select').style.display = showNewProject ? 'none' : 'block';
+            });
+        });
+        
+        // Also set up the create project button listener here
+        const createBtn = $('#create-project-btn');
+        if (createBtn) {
+            createBtn.addEventListener('click', handleJiraCreateProject);
+        }
+        
+        // Reset to default state
+        $('input[name="import-option"][value="existing"]').checked = true;
+        $('#new-project-section').style.display = 'none';
+        $('#existing-projects-select').style.display = 'block';
+    }
+
+    async function loadProjectsForJiraImport() {
+        try {
+            state.projects = await apiRequest('/projects');
+            const selector = $('#existing-projects-select');
+            selector.innerHTML = '<option value="">Select Project</option>' +
+                state.projects.map(p => `<option value="${p.project_id}">${p.project_name}</option>`).join('');
+        } catch (error) {
+            console.error('Failed to load projects for import:', error);
+        }
+    }
+
+    async function confirmJiraImport() {
+        if (!state.selectedJiraIssue) return;
+
+        const useExisting = $('input[name="import-option"]:checked').value === 'existing';
+        const targetProjectId = useExisting ? $('#existing-projects-select').value : null;
+        const newProjectName = !useExisting ? $('#new-project-name-input').value : null;
+
+        if ((useExisting && !targetProjectId) || (!useExisting && !newProjectName)) {
+            showError('Please select a project or enter a new project name.', '#main-error'); // Changed here
+            return;
+        }
+
+        try {
+            const result = await apiRequest(
+                `/jira/import-issue?connection_id=${state.currentJiraConnection}`,
+                {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        issue_key: state.selectedJiraIssue.key,
+                        target_project_id: targetProjectId,
+                        new_project_name: newProjectName
+                    })
+                }
+            );
+
+            // Close modal
+            $('#jira-import-modal').style.display = 'none';
+            
+            // Switch to query page with the imported context
+            state.selectedProjectId = result.project_id;
+            navigateTo('query');
+
+            console.log("Jira Issue content: ",result.issue_context)
+            
+            // Pre-fill chat input with issue context
+            $('#chat-input').value = `Regarding Jira issue ${state.selectedJiraIssue.key}: ${state.selectedJiraIssue.summary}\n\n${result.issue_context}`;
+            
+            console.log(`Successfully imported issue! ${result.attachments_processed} attachments processed.`, '#main-error'); // Changed here
+            
+        } catch (error) {
+            showError(error.message, '#main-error'); // Changed here
+        }
     }
 
     init();
