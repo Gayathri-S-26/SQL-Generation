@@ -24,7 +24,7 @@ from dotenv import load_dotenv
 
 # LangGraph imports
 from langgraph.graph import StateGraph, END
-
+from langgraph.checkpoint.memory import InMemorySaver
 
 load_dotenv()
 
@@ -476,6 +476,19 @@ def evaluate_query_rag(project_id, user_query, sql_gen, docs):
         "Precision@5": precision5,
         "NumClaims": len(all_claims)
     }
+    
+def get_project_documents(project_id: int) -> list:
+    """Return a list of document names for the given project_id."""
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT name FROM documents WHERE project_id=?", (project_id,))
+        rows = c.fetchall()
+        conn.close()
+        return [r[0] for r in rows] if rows else []
+    except Exception as e:
+        print(f"⚠️ Error fetching project documents: {e}")
+        return []
 
 # ----------------------------
 # Agent Functions
@@ -582,6 +595,25 @@ def retrieval_agent(state: AgentState) -> AgentState:
     """Use LLM to analyze retrieval needs and fetch relevant documents."""
     print("🔍 Retrieval Agent: Analyzing retrieval needs...")
     
+    # 🧩 Feedback-aware logic
+    validation_feedback = state.get("rag_metrics", {}).get("LLMReasoning", "")
+    validation_suggestions = state.get("improvement_suggestions", [])
+    retry_target = state.get("retry_target", "none")
+    reflection_count = state.get("reflection_count", 0)
+
+    # Include validation insights if this is a retry after validation
+    feedback_section = ""
+    if retry_target == "retrieval" and (validation_feedback or validation_suggestions):
+        feedback_section = f"""
+        The previous validation step suggested retrieval improvement.
+        REASONING: {validation_feedback}
+        SUGGESTIONS: {', '.join(validation_suggestions) if validation_suggestions else 'None'}
+        
+        Based on this feedback, refine your retrieval analysis to better target the relevant information.
+        """
+        print("🧠 Applying validation feedback to refine retrieval...")
+    
+    
     prompt = f"""
     Analyze the user query for document retrieval needs. Return ONLY JSON with these exact fields:
     - retrieval_mode: "document_level" if user requests SQL or analysis for entire document, otherwise "chunk_level"
@@ -590,6 +622,8 @@ def retrieval_agent(state: AgentState) -> AgentState:
     - complexity: "low", "medium", or "high" based on query complexity
 
     USER QUERY: {state['user_query']}
+    
+    {feedback_section}
 
     Guidelines:
     
@@ -622,6 +656,27 @@ def retrieval_agent(state: AgentState) -> AgentState:
     """
     
     try:
+        actual_doc_names = get_project_documents(state['project_id'])
+        if not actual_doc_names:
+            print("⚠️ No documents found in this project. Skipping retrieval.")
+            
+            state.update({
+                "contexts": [],
+                "retrieval_mode": "none",
+                "required_documents": [],
+                "keyword_search_words": [],
+                "complexity": "none",
+                "retrieval_metrics": {
+                    "documents_found": 0,
+                    "keywords_used": 0,
+                    "chunks_retrieved": 0,
+                    "complexity_level": "none"
+                },
+                "current_step": "retrieval_complete",
+                "retry_target": None
+            })
+            
+            return state
         # Get LLM analysis for retrieval parameters
         result = call_llm(prompt)
         
@@ -683,6 +738,24 @@ def retrieval_agent(state: AgentState) -> AgentState:
             max_candidates=max_candidates
         )
         contexts.extend(project_chunks)
+        
+        if not contexts:
+            print("⚠️ Retrieval completed but no matching chunks found.")
+            state.update({
+                "contexts": [],
+                "retrieval_mode": retrieval_mode,
+                "required_documents": required_documents,
+                "keyword_search_words": keyword_search_words,
+                "complexity": complexity,
+                "retrieval_metrics": {
+                    "documents_found": len(required_documents),
+                    "keywords_used": len(keyword_search_words),
+                    "chunks_retrieved": 0,
+                    "complexity_level": complexity
+                },
+                "current_step": "retrieval_complete"
+            })
+            return state
         
         # Remove duplicates using existing logic
         seen_texts = set()
@@ -758,15 +831,42 @@ def generation_agent(state: AgentState) -> AgentState:
     print("🤖 Generation Agent: Generating response...")
     
     try:
+        validation_feedback = state.get("rag_metrics", {}).get("LLMReasoning", "")
+        validation_suggestions = state.get("improvement_suggestions", [])
+        retry_target = state.get("retry_target", "none")
+        reflection_count = state.get("reflection_count", 0)
+        
+        retrieval_mode = state.get("retrieval_mode", "unknown")
+        retrieval_metrics = state.get("retrieval_metrics", {})
+        documents_found = retrieval_metrics.get("documents_found", 0)
+        no_docs_present = (retrieval_mode == "none" or documents_found == 0)
+
+        # Include validation insights if this is a retry after validation
+        feedback_section = ""
+        if retry_target == "generation" and (validation_feedback or validation_suggestions):
+            feedback_section = f"""
+            The previous validation step suggested generation improvement.
+            REASONING: {validation_feedback}
+            SUGGESTIONS: {', '.join(validation_suggestions) if validation_suggestions else 'None'}
+            
+            Based on this feedback, refine your generation.
+            """
+            print("🧠 Applying validation feedback to refine generation...")
+                
+                
         if state.get("query_intent") == "conversational":
             # Handle conversational queries (non-streaming for simplicity)
             print("💬 Generating conversational response...")
             conversational_prompt = f"""
             You are a friendly AI assistant. Respond naturally to the user's message.
-
+            Always stay within the conversation topic or SQL/data-related context.
+            Never fabricate information, speculate, or respond to out-of-scope topics (e.g., personal opinions, politics, weather, jokes).
+            If the user asks something out of scope, politely decline and redirect back to SQL or data-related help.
+            
             USER MESSAGE: {state['user_query']}
             CONVERSATION HISTORY: {state['memory'][-20:] if state['memory'] else 'No recent history'}
-
+            
+            {feedback_section}
             Respond in a friendly, helpful manner. Keep it concise and natural.
             """
             
@@ -795,6 +895,10 @@ def generation_agent(state: AgentState) -> AgentState:
             # ROLE: Expert SQL Assistant
             # CONTEXT: You are analyzing documentation to generate precise SQL queries.
             ---
+            
+            {feedback_section}
+            
+            CONVERSATION HISTORY: {state['memory'][-20:] if state['memory'] else 'No recent history'}
 
             # AVAILABLE DOCUMENTATION:
             {final_json}
@@ -803,18 +907,22 @@ def generation_agent(state: AgentState) -> AgentState:
 
             # USER QUERY:
             "{state['user_query']}"
+            
+            # PROJECT DOCUMENT STATUS:
+            {"No documents are available for this project." if no_docs_present else "Some documents were available for retrieval."}
 
             ---
 
             # INSTRUCTIONS:
 
             ## 1. QUERY ANALYSIS & INTENT
-            - Analyze the user's question to understand what data is being requested.  
+            - Analyze the user's question to understand what data is being requested. 
+               -- **SQL_QUERY** → The user is asking for a data query, report, metric, aggregation, or data relationship. 
+               -- **GENERAL_QUESTION** → The user is asking for an explanation, concept, or descriptive answer — not a SQL request.
+               -- **OUT_OF_SCOPE** → The question is unrelated to data, SQL, or the provided documentation (e.g., weather, jokes, small talk). 
             - Identify the key **entities**, **metrics**, **filters**, and **relationships** involved.  
             - Determine whether this is a **simple lookup**, **aggregation**, **join**, or **complex analytical query**.
-
             ---
-
             ## 2. SCHEMA UNDERSTANDING (From Documentation)
             **CRITICAL:** Carefully extract and verify the following information from the provided context:
             - Tables available and their purposes.  
@@ -845,22 +953,44 @@ def generation_agent(state: AgentState) -> AgentState:
             - Place aggregation/filter/GROUP BY/HAVING/ORDER BY/other conditions boxes separately and join them.
             - Keep it compact and aligned, like a schema diagram.
 
-            ## 5. OUTPUT FORMAT
-
-            Answer:
+            ## 5. OUTPUT FORMAT — ADAPTIVE RESPONSE GENERATION
+            
+            ### FORMATTING REQUIREMENTS:
+            - Use CLEAR SECTION BREAKS with blank lines between major sections
+            - Separate different points with line breaks for better readability
+            - Use bullet points with proper spacing between each item
+            - Add blank lines before and after code blocks
+            - Ensure paragraphs have proper spacing for easy reading
+            
+            ### CASE 1: If intent == "SQL_QUERY"
+            Follow this full, structured output:
             Provide a brief natural-language summary that directly answers the user's question.
 
-            SQL Query:
+            ** SQL Query: **
             SQL queries should be in copy-friendly format within "```sql ```".
             ```sql SELECT * FROM ... ```
 
-            Explanation Diagram:
+            ** Explanation Diagram: **
             ASCII diagram showing tables, relationships, and key operations
 
-            Notes:
+            ** Notes: **
             * List any assumptions made.
             * Mention limitations or potential ambiguities.
             * Suggest further analysis if applicable.
+            
+            ### CASE 2: If intent == "GENERAL_QUESTION"
+
+            * Do NOT include SQL, diagrams, or “Notes” placeholders.
+            * Provide a concise and factual explanation directly answering the question.
+            * If relevant, refer to documentation or general SQL best practices.
+            * If some info is missing, politely state what’s unavailable and suggest next steps.
+            
+            ### CASE 3: If intent == "OUT_OF_SCOPE"
+
+            * Acknowledge politely that the question is outside SQL or documentation scope.
+            * Do NOT generate any SQL or technical placeholders.
+            * Respond conversationally, in a friendly and helpful tone.
+            * Optionally offer to switch back to SQL/data assistance.
 
             ## 6. CONVERSATIONAL HANDLING
 
@@ -881,7 +1011,6 @@ def generation_agent(state: AgentState) -> AgentState:
             full_response = ""
             attempt_count = 0
             is_fallback = False
-            
             for chunk in call_gemini(structured_prompt, stream=True):
                 if isinstance(chunk, dict) and "text" in chunk:
                     text_chunk = chunk["text"]
@@ -931,6 +1060,10 @@ def validation_agent(state: AgentState) -> AgentState:
     try:
         # Only validate SQL responses that have been generated
         if state.get("response_type") == "sql" and state.get("generated_response"):
+            retrieval_mode = state.get("retrieval_mode", "unknown")
+            retrieval_metrics = state.get("retrieval_metrics", {})
+            documents_found = retrieval_metrics.get("documents_found", 0)
+            no_docs_present = (retrieval_mode == "none" or documents_found == 0)
             generated_response = state["generated_response"]
             contexts = state.get("contexts", [])
             user_query = state["user_query"]
@@ -950,6 +1083,9 @@ def validation_agent(state: AgentState) -> AgentState:
             
             AVAILABLE CONTEXTS:
             {(contexts)}
+            
+            PROJECT DOCUMENT STATUS:
+            {"No documents are available for this project. Retrieval was skipped." if no_docs_present else "Some documents were available for retrieval."}
             
             RETRIEVAL METRICS (Rule-based):
             - Precision@1: {rag_metrics.get('Precision@1', 'N/A')}
@@ -981,6 +1117,7 @@ def validation_agent(state: AgentState) -> AgentState:
             - GENERATION issues: good contexts but poor SQL, syntax errors
             - If both bad but retrieval worse → RETRIEVAL
             - Default to RETRIEVAL if unclear
+            - If NO DOCUMENTS are available for the Project, DO NOT suggest retrieval retry.
 
             Return ONLY JSON with these exact fields:
             - "QueryCoverage": number between 0.0-1.0
@@ -1102,6 +1239,7 @@ def validation_agent(state: AgentState) -> AgentState:
         })
     
     return state
+
 
 def update_status_before_node(state: AgentState, node_name: str):
     status_messages = {
@@ -1250,6 +1388,12 @@ async def chat(req: ChatRequest, current_user: dict = Depends(get_current_user))
         improvement_suggestions=[],
         reflection_count=0
     )
+    config = {
+        "configurable": {
+            "thread_id": conversation_id  # ✅ Only needed
+        }
+    }
+    
         
     
     # Store query in database initially
@@ -1278,51 +1422,17 @@ async def chat(req: ChatRequest, current_user: dict = Depends(get_current_user))
         previous_status = ""
         
         # Stream status updates during workflow execution
-        
         for current_state in agent_workflow.stream(initial_state, config=config):
-            # current_state is a dict with node_name: state
             for node_name, state in current_state.items():
                 if "current_status" in state and state["current_status"] != previous_status:
                     yield f"[[[STATUS]]]{state['current_status']}"
                     previous_status = state["current_status"]
                 final_state = state
-            
         
         workflow_state = final_state if final_state else agent_workflow.invoke(initial_state, config=config)
-
-    
-        if "generation_prompt" not in workflow_state:
-            workflow_state["generation_prompt"] = ""
-        if "contexts" not in workflow_state:
-            workflow_state["contexts"] = []
-        if "response_type" not in workflow_state:
-            workflow_state["response_type"] = "unknown"
-        if "current_step" not in workflow_state:
-            workflow_state["current_step"] = "generation_complete"
-        if "rag_metrics" not in workflow_state:
-            workflow_state["rag_metrics"] = {}
-        if "validation_result" not in workflow_state:
-            workflow_state["validation_result"] = ""
-        if "needs_improvement" not in workflow_state:
-            workflow_state["needs_improvement"] = False
-            
-        full_answer = ""
         
-        # Streaming Output chunks to frontend
-        stream_chunks = workflow_state.get("stream_chunks")
-        if stream_chunks and isinstance(stream_chunks, list) and len(stream_chunks) > 0 and workflow_state.get("response_type")=="sql":
-            print(f"🎯 Streaming {len(stream_chunks)} chunks to frontend...")
-            for i, chunk in enumerate(stream_chunks):
-                full_answer += chunk
-                print(f"📤 Sending chunk {i+1}: {chunk[:30]}...")
-                yield chunk
-        else:
-            # Fallback to generated_response instead of streaming response
-            fallback_response = workflow_state.get("generated_response", "No response generated.")
-            print(f"Full answer: {fallback_response[:100]}...")
-            full_answer = fallback_response
-            yield fallback_response
-        
+        # Get the final response
+        full_answer = workflow_state.get("generated_response", "")
         
         # Calculate response time
         response_time = time.time() - start_time
@@ -1335,7 +1445,7 @@ async def chat(req: ChatRequest, current_user: dict = Depends(get_current_user))
             conversation_memory[conversation_id] = memory[-MAX_MEMORY_LENGTH:]
             
         rag_metrics = workflow_state.get("rag_metrics", {})
-        print(f"rag metrics {rag_metrics}")
+        
         # Update database with final answer
         conn = get_connection()
         c = conn.cursor()
@@ -1347,8 +1457,8 @@ async def chat(req: ChatRequest, current_user: dict = Depends(get_current_user))
             WHERE id = ?
         """, (full_answer,
             response_time,
-            workflow_state.get("attempt_count"),  # or attempt_count if available
-            workflow_state.get("is_fallback"),  # or is_fallback if available
+            workflow_state.get("attempt_count", 1),
+            workflow_state.get("is_fallback", False),
             rag_metrics.get("Precision@1"),
             rag_metrics.get("Precision@3"),
             rag_metrics.get("Precision@5"),
@@ -1360,8 +1470,11 @@ async def chat(req: ChatRequest, current_user: dict = Depends(get_current_user))
         conn.commit()
         conn.close()
         
-        # Send metadata at the end (your existing pattern)
-        yield f"\n[[[META]]]{json.dumps({'contexts': workflow_state.get('contexts', []), 'query_id': query_id, 'conversation_id': conversation_id})}"
+        # Send the COMPLETE response at the end (not in chunks)
+        yield f"{full_answer}"
+        
+        # Send metadata at the end
+        yield f"[[[META]]]{json.dumps({'contexts': workflow_state.get('contexts', []), 'query_id': query_id, 'conversation_id': conversation_id})}"
     
     return StreamingResponse(stream_and_save(), media_type="text/plain")
 
