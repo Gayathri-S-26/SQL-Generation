@@ -572,6 +572,14 @@ progress { width: 100px; }
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
     border: 1px solid #f0f0f0;
     position: relative;
+    /* FIXED WIDTH SOLUTION */
+    width: 85%; /* Fixed percentage of container */
+    max-width: 900px; /* Maximum width for large screens */
+    min-width: 320px; /* Minimum width for small screens */
+    
+    /* Ensure proper text wrapping */
+    word-wrap: break-word;
+    overflow-wrap: break-word;
 }
 
 .assistant-bubble::after {
@@ -684,10 +692,91 @@ pre:hover .copy-btn {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
+/* Paragraph spacing */
+.assistant-bubble .message-content p {
+    margin: 10px 0;   /* Adds space above and below each paragraph */
+}
+
+/* Headings */
+.assistant-bubble .message-content h1,
+.assistant-bubble .message-content h2,
+.assistant-bubble .message-content h3,
+.assistant-bubble .message-content h4 {
+    margin-top: 18px;
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+
+/* Bullet Lists */
+.assistant-bubble .message-content ul,
+.assistant-bubble .message-content ol {
+    margin: 10px 0 10px 10px;  /* top, bottom, left indentation */
+    padding-left: 20px;
+}
+
+.assistant-bubble .message-content li {
+    margin-bottom: 5px; /* gap between bullet points */
+}
+
+/* Nested bullet lists */
+.assistant-bubble .message-content ul ul,
+.assistant-bubble .message-content ol ol {
+    margin-top: 5px;
+    margin-bottom: 5px;
+}
+
+/* Bold & italic emphasis */
+.assistant-bubble .message-content strong {
+    font-weight: bold;
+}
+.assistant-bubble .message-content em {
+    font-style: italic;
+}
+
+.assistant-bubble .message-content table {
+    background: #1a1d23;
+    color: #e9ecef;
+    padding: 1.5rem;
+    border-radius: 12px;
+    margin: 1rem 0;
+    overflow-x: auto;
+    position: relative;
+    border: 1px solid #e9ecef;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.88rem;
+    line-height: 1.5;
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.3);
+    display: block; /* ← ADD THIS - makes it scrollable */
+    max-width: 100%; /* ← ADD THIS - prevents overflow */
+    border-collapse: collapse; 
+}
+
+.assistant-bubble .message-content th,
+.assistant-bubble .message-content td {
+    border: 1px solid #e9ecef !important;
+    padding: 12px 16px;
+}
+
+.assistant-bubble .message-content {
+    max-width: 100%;
+    
+    /* Critical: Contain all child elements */
+    word-break: break-word;
+    hyphens: auto;
+    overflow-wrap: break-word;
+    
+    /* Reset for specific elements that should scroll */
+    table, pre, code {
+        word-break: normal;
+        hyphens: manual;
+    }
+}
+
 /* DeepSeek-style chat input */
 #chat-form {
     display: flex;
     gap: 0.75rem;
+    align-items: flex-end;
     margin-top: 0;
     background: white;
     border: 1px solid #e9ecef;
@@ -712,6 +801,7 @@ pre:hover .copy-btn {
     background: transparent;
     padding: 0.75rem 1rem;
     font-size: 1rem;
+    font-family: inherit;
     outline: none;
     border-radius: 20px;
     resize: none;
@@ -1087,6 +1177,14 @@ pre:hover .copy-btn {
     border-bottom-left-radius: 5px;
     align-self: flex-start;
     margin-right: 0;
+    /* FIXED WIDTH SOLUTION */
+    width: 85%; /* Fixed percentage of container */
+    max-width: 900px; /* Maximum width for large screens */
+    min-width: 320px; /* Minimum width for small screens */
+    
+    /* Ensure proper text wrapping */
+    word-wrap: break-word;
+    overflow-wrap: break-word;
 }
 
 #history-transcript .assistant-bubble::before {
@@ -1113,6 +1211,82 @@ pre:hover .copy-btn {
     margin-top: 0.5rem;
     overflow-x: auto;
     position: relative;
+}
+
+#history-transcript .assistant-bubble p {
+    margin: 10px 0;   /* Adds space above and below each paragraph */
+}
+
+#history-transcript .assistant-bubble h1,
+#history-transcript .assistant-bubble h2,
+#history-transcript .assistant-bubble h3,
+#history-transcript .assistant-bubble h4 {
+    margin-top: 18px;
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+
+#history-transcript .assistant-bubble ul,
+#history-transcript .assistant-bubble ol {
+    margin: 10px 0 10px 10px;  /* top, bottom, left indentation */
+    padding-left: 20px;
+}
+
+#history-transcript .assistant-bubble li {
+    margin-bottom: 5px; /* gap between bullet points */
+}
+
+#history-transcript .assistant-bubble ul ul,
+#history-transcript .assistant-bubble ol ol {
+    margin-top: 5px;
+    margin-bottom: 5px;
+}
+
+#history-transcript .assistant-bubble strong {
+    font-weight: bold;
+}
+
+#history-transcript .assistant-bubble em {
+    font-style: italic;
+}
+
+#history-transcript .assistant-bubble table {
+    background: #1a1d23;
+    color: #e9ecef;
+    padding: 1.5rem;
+    border-radius: 12px;
+    margin: 1rem 0;
+    overflow-x: auto;
+    position: relative;
+    border: 1px solid #e9ecef;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.88rem;
+    line-height: 1.5;
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.3);
+    border-collapse: collapse; 
+    display: block; /* ← ADD THIS - makes it scrollable */
+    max-width: 100%; /* ← ADD THIS - prevents overflow */
+}
+
+#history-transcript .assistant-bubble th,
+#history-transcript .assistant-bubble td {
+    border: 1px solid #e9ecef !important;
+    padding: 12px 16px;
+}
+
+#history-transcript .assistant-bubble {
+    max-width: 100%;
+    
+    /* Critical: Contain all child elements */
+    word-break: break-word;
+    hyphens: auto;
+    overflow-wrap: break-word;
+    
+    /* Reset for specific elements that should scroll */
+    table, pre, code {
+        word-break: normal;
+        hyphens: manual;
+    }
 }
 
 /* --- Analytics & Charting --- */
