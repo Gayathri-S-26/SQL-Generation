@@ -1,3 +1,15 @@
+marked.setOptions({
+  breaks: true,        // Convert \n to <br>
+  gfm: true,           // GitHub Flavored Markdown
+  paragraphs: true,    // Create proper <p> tags
+  headerIds: false,    // Disable automatic header IDs
+  mangle: false,       // Don't escape underscores
+  sanitize: false,     // Don't sanitize HTML (allows proper formatting)
+  smartLists: true,    // Use smarter list behavior
+  smartypants: true,   // Use smart punctuation
+  xhtml: false         // Don't use XHTML self-closing tags
+});
+
 document.addEventListener('DOMContentLoaded', () => {
     // --- CONFIGURATION & STATE ---
     const API_BASE_URL = 'http://127.0.0.1:8000';
@@ -144,6 +156,18 @@ document.addEventListener('DOMContentLoaded', () => {
         $('#jira-connection-selector').addEventListener('change', loadJiraProjects);
         $('#confirm-import-btn').addEventListener('click', confirmJiraImport);
         $('#cancel-import-btn').addEventListener('click', () => $('#jira-import-modal').style.display = 'none');
+        $('#chat-input').addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault(); // Prevent newline
+                $('#chat-form').dispatchEvent(new Event('submit')); // Trigger send
+            }
+            // If Shift+Enter is pressed → allow newline
+        });
+        $('#chat-input').addEventListener('input', (e) => {
+        const el = e.target;
+        el.style.height = 'auto';                      // reset first
+        el.style.height = Math.min(el.scrollHeight, 120) + 'px';      // then resize correctly
+        });
 
     }
     
@@ -228,39 +252,49 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault(); const name = $('#new-project-name').value.trim(); if (!name) return;
         try { await apiRequest('/project', { method: 'POST', body: JSON.stringify({ project_name: name }) }); $('#new-project-name').value = ''; loadProjects(); } catch (error) {}
     }
+
+    async function pollStatus(doc) {
+        try {
+            const statusData = await apiRequest(`/status/${doc.doc_id}`);
+            if (statusData.status !== 'completed') {
+                setTimeout(() => pollStatus(doc), 2000); // poll every 2s
+            }
+            loadProjectDetails(true); // refresh UI
+        } catch (error) {
+            console.error('Error polling status:', error);
+        }
+    }
+
     async function loadProjectDetails(polling = false) {
         $('#project-detail-title').textContent = `Documents for: ${state.selectedProjectName}`;
-        try {
-            const data = await apiRequest(`/project/${state.selectedProjectId}/documents`);
-            const list = $('#document-list'); 
-            list.innerHTML = '';
+        const data = await apiRequest(`/project/${state.selectedProjectId}/documents`);
+        const list = $('#document-list');
+        list.innerHTML = '';
 
-            if (data.documents.length === 0) { 
-                list.innerHTML = '<p>No documents found. Upload one!</p>'; 
-                return; 
+        let hasPending = false;
+
+        if (data.documents.length === 0) { 
+            list.innerHTML = '<p>No documents found. Upload one!</p>'; 
+            return; 
+        }
+
+        data.documents.forEach(doc => {
+            if (doc.status.toLowerCase() === 'pending' || doc.status === 'indexing') {
+                hasPending = true;
+                if (!polling) pollStatus(doc); // start polling this doc
             }
 
-            let hasPending = false;
-            data.documents.forEach(doc => {
-                if (doc.status.toLowerCase() === 'pending') hasPending = true;
-                list.innerHTML += `
+            list.innerHTML += `
                 <div class="document-list-item">
                     <span class="doc-name">${doc.doc_name}</span>
                     <div class="doc-status">
-                        <span>${doc.status.charAt(0).toUpperCase() + doc.status.slice(1)}</span>
+                        <span>${doc.status}</span>
                         <button class="delete-btn" data-id="${doc.doc_id}">🗑️ Delete</button>
                     </div>
                 </div>`;
-            });
+        });
 
-            $$('.delete-btn').forEach(btn => btn.addEventListener('click', handleDeleteDocument));
-
-            // Poll if any document is still pending
-            if (hasPending && !polling) {
-                setTimeout(() => loadProjectDetails(true), 2000); // poll every 2 seconds
-            }
-
-        } catch(error) {}
+        $$('.delete-btn').forEach(btn => btn.addEventListener('click', handleDeleteDocument));
     }
 
     async function handleDeleteDocument(e) {
@@ -392,6 +426,7 @@ document.addEventListener('DOMContentLoaded', () => {
         $('#chat-messages').appendChild(userMessageDiv);
         
         input.value = '';
+        input.dispatchEvent(new Event('input'));
         
         // SCROLL: After user message is added
         autoScrollToBottom();
@@ -501,6 +536,15 @@ document.addEventListener('DOMContentLoaded', () => {
             // Clear timeout and mark as complete
             clearTimeout(timeoutId);
             responseComplete = true;
+
+            console.log('=== RAW LLM OUTPUT ===');
+            console.log(fullResponse);
+            console.log('=== SECTIONS FOUND ===');
+            console.log('Summary:', fullResponse.includes('Summary'));
+            console.log('SQL Query:', fullResponse.includes('SQL Query'));
+            console.log('Explanation Diagram:', fullResponse.includes('Explanation Diagram'));
+            console.log('Notes:', fullResponse.includes('Notes'));
+            console.log('=====================');
 
             // Final update - remove status and show only the response with actions
             assistantBubble.innerHTML = `
