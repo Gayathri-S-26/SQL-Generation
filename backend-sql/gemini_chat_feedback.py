@@ -826,6 +826,10 @@ def retrieval_agent(state: AgentState) -> AgentState:
 # Generation Agent
 # ----------------------------
 
+# ----------------------------
+# Generation Agent
+# ----------------------------
+
 def generation_agent(state: AgentState) -> AgentState:
     """Generate response based on query intent and available contexts."""
     print("🤖 Generation Agent: Generating response...")
@@ -939,6 +943,7 @@ def generation_agent(state: AgentState) -> AgentState:
             -- Use exact table and column names from the documentation.
             -- Include proper JOIN conditions using PK/FK relationships.
             -- Apply relevant WHERE clauses, aggregations, and ordering.
+            -- **CRITICAL:** Always generate a performance-optimized and cost-efficient SQL query.
 
             -- Formatting Guidelines:
             --   • Use clear indentation and line breaks.
@@ -966,14 +971,14 @@ def generation_agent(state: AgentState) -> AgentState:
             Follow this full, structured output:
             Provide a brief natural-language summary that directly answers the user's question.
 
-            ** SQL Query: **
+            **SQL Query**
             SQL queries should be in copy-friendly format within "```sql ```".
             ```sql SELECT * FROM ... ```
 
-            ** Explanation Diagram: **
+            **Explanation Diagram**
             ASCII diagram showing tables, relationships, and key operations
 
-            ** Notes: **
+            **Notes**
             * List any assumptions made.
             * Mention limitations or potential ambiguities.
             * Suggest further analysis if applicable.
