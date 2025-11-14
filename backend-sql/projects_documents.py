@@ -7,7 +7,7 @@ from typing import List
 from fastapi import APIRouter, Depends, UploadFile, File, BackgroundTasks, Query, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from backend_sql.databases import get_connection, load_project_index, persist_project_index, project_cache
+from backend_sql.databases import get_connection, load_project_index, persist_project_index, project_cache, project_dir
 from langchain.schema import Document
 from backend_sql.split_embeddings import load_and_split_document, save_and_index, rebuild_project_index_from_store
 from backend_sql.auth import get_current_user
@@ -198,6 +198,13 @@ def delete_document(project_id: int, doc_id: int):
     except Exception:
         pass
 
-    pi = load_project_index(project_id)
+    if project_id in project_cache:
+        del project_cache[project_id]
+        
+    d = project_dir(project_id)
+    vs_path = os.path.join(d, "faiss_store.pkl")
+    if os.path.exists(vs_path):
+        os.remove(vs_path)
+        
     rebuild_project_index_from_store(project_id)
     return {"status": "deleted", "doc_id": doc_id}
