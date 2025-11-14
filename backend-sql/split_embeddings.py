@@ -219,11 +219,12 @@ def split_tabular_document(filepath: str, batch_size: int = 50):
         sheets = {name: xls.parse(name) for name in xls.sheet_names}
 
     documents = []
+    filename = Path(filepath).name
     for sheet, df in sheets.items():
         # Schema / header info
         documents.append(Document(
             page_content=f"Sheet: {sheet}\nColumns: {', '.join(df.columns)}",
-            metadata={"category": "schema", "sheet": sheet}
+            metadata={"category": "schema", "sheet": sheet, "filename": filename}
         ))
 
         # Row batches
@@ -233,7 +234,7 @@ def split_tabular_document(filepath: str, batch_size: int = 50):
             redacted_content = redact_pii(batch_text)
             documents.append(Document(
                 page_content=redacted_content,
-                metadata={"category": "rows", "sheet": sheet, "batch": f"{start}-{start+len(batch)-1}"}
+                metadata={"category": "rows", "sheet": sheet, "batch": f"{start}-{start+len(batch)-1}", "filename": filename}
             ))
     return documents
 
