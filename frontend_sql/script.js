@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let state = {
         token: localStorage.getItem('accessToken'), user: null, currentPage: 'query',
         projects: [], selectedProjectId: null, selectedProjectName: null,
-        chatHistory: {}, conversationId: {}, charts: {},
+        chatHistory: {}, conversationId: {}, charts: {}, isStreaming: false, regeneratingQueryId: null,
     };
     state.jiraConnections = [];
     state.currentJiraConnection = null;
@@ -129,14 +129,15 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         $('#sidebar-new-query-btn').addEventListener('click', () => {
-            if (!state.selectedProjectId) return alert("Please select a project first.");
-
+            navigateTo('query');
+            if (state.selectedProjectId) {
             // Reset chat + conversation for the selected project
             state.chatHistory[state.selectedProjectId] = [];
             state.conversationId[state.selectedProjectId] = null;
 
             // Refresh UI - this will now show welcome message
             renderChatHistory();
+            }
         });
 
         $('#create-project-form').addEventListener('submit', handleCreateProject);
@@ -168,7 +169,12 @@ document.addEventListener('DOMContentLoaded', () => {
         el.style.height = 'auto';                      // reset first
         el.style.height = Math.min(el.scrollHeight, 120) + 'px';      // then resize correctly
         });
+        $('#sidebar-toggle').addEventListener('click', toggleSidebar);
 
+    }
+
+    function toggleSidebar() {
+    $('#sidebar').classList.toggle('sidebar-collapsed');
     }
     
 
@@ -321,12 +327,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 option.textContent = p.project_name; 
                 selector.appendChild(option); 
             }); 
+            
+
             if(state.projects.length > 0) { 
-                selector.value = state.selectedProjectId || state.projects[0].project_id; 
-                state.selectedProjectId = selector.value; 
-                state.selectedProjectName = selector.options[selector.selectedIndex].text; 
-                renderChatHistory(); // This will now show welcome message if no chats
+                // Don't auto-select first project - leave it as "Select a Project"
+                if (state.selectedProjectId) {
+                    selector.value = state.selectedProjectId;
+                    state.selectedProjectName = selector.options[selector.selectedIndex].text; 
+                    renderChatHistory(); // This will now show welcome message if no chats
+                }
+                else {
+                // ✅ ADD WELCOME MESSAGE HERE when no project is selected
+                const messagesContainer = $('#chat-messages'); 
+                messagesContainer.innerHTML = `
+                <div class="chat-bubble assistant-bubble welcome-bubble">
+                    <div class="welcome-content">
+                        <div class="welcome-text">
+                            👋<br>
+                            <strong>Welcome to AI Powered SQL Automation!</strong><br>I can generate SQL queries, analyze documents, and answer questions.
+                        </div>
+                    </div>
+                </div>
+                `;
+            }
             } 
+
         } catch (error) {} 
     }
     function renderChatHistory() { 
@@ -335,6 +360,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const history = state.chatHistory[state.selectedProjectId] || []; 
 
         console.log('History retrieved for rendering:', history);
+
+        console.log('🧠 CURRENT CHAT HISTORY FOR RENDERING:', history);
+        console.log('📋 Project ID:', state.selectedProjectId);
+        console.log('🔢 Number of messages:', history.length);
+        
+        // Log each message with query_id
+        history.forEach((msg, index) => {
+            console.log(`📄 Message ${index + 1} (${msg.role}):`, {
+                content: msg.content?.substring(0, 30) + '...',
+                query_id: msg.query_id,
+                messageId: msg.messageId
+            });
+        });
         
         // Show welcome message if no chat history
         if (history.length === 0) {
@@ -363,9 +401,7 @@ document.addEventListener('DOMContentLoaded', () => {
         messagesContainer.appendChild(messageDiv);
         
         // Add feedback section for assistant messages
-        if (msg.role === 'assistant') {
-            addFeedbackSection(messageDiv, msg);
-        }
+        
         });
 
         setTimeout(autoScrollToBottom, 100);
@@ -397,241 +433,293 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    async function handleChatSubmit(e, isRegeneration = false) {
-        if (e) e.preventDefault();
-        
-        const input = $('#chat-input');
-        const query = input.value.trim();
-        
-        if (!query || !state.selectedProjectId) return;
-        
-        const projId = state.selectedProjectId;
-        
-        // Initialize chat history if needed
-        if (!state.chatHistory[projId]) {
-            state.chatHistory[projId] = [];
+    // UI helpers to disable/enable send controls while streaming
+function disableSendUI() {
+    const submitBtn = document.querySelector('#chat-form button[type="submit"]');
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.classList.add('disabled-button');
+    }
+    const input = document.querySelector('#chat-input');
+    if (input) input.disabled = true;
+    state.isStreaming = true;
+}
+
+function enableSendUI() {
+    const submitBtn = document.querySelector('#chat-form button[type="submit"]');
+    if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.classList.remove('disabled-button');
+    }
+    const input = document.querySelector('#chat-input');
+    if (input) input.disabled = false;
+    state.isStreaming = false;
+}
+
+// Replace existing handleChatSubmit with this version
+async function handleChatSubmit(e, isRegeneration = false) {
+    if (e) e.preventDefault();
+
+    // Prevent sending while a previous response is still streaming
+    if (state.isStreaming) {
+        console.warn('Send blocked: assistant is still responding.');
+        return;
+    }
+
+    const input = $('#chat-input');
+    const query = input.value.trim();
+
+    if (!query) return;
+    if (!state.selectedProjectId) {
+        Swal.fire({
+            text: 'Please select a project first',
+            icon: 'warning',
+            showConfirmButton: true,
+            iconColor: '#3F0D66',
+            background: "#ffffff",
+            color: "#3F0D66",
+            confirmButtonColor: "#3F0D66",
+            confirmButtonText: "OK",
+            buttonsStyling: true   // <- IMPORTANT
+        });
+        return;
+    }
+    disableSendUI(); // disable UI until response completes
+
+    const projId = state.selectedProjectId;
+
+    // Initialize chat history if needed
+    if (!state.chatHistory[projId]) {
+        state.chatHistory[projId] = [];
+    }
+
+    // Add user message to history
+    const userMessage = {
+        role: 'user',
+        content: query,
+        messageId: `msg-${Date.now()}-user-${Math.random().toString(36).substr(2, 5)}`,
+        originalContent: query
+    };
+
+    state.chatHistory[projId].push(userMessage);
+
+    // Render user message with actions
+    const userMessageDiv = renderEnhancedMessage(query, 'user', userMessage.messageId);
+    $('#chat-messages').appendChild(userMessageDiv);
+
+    input.value = '';
+    input.dispatchEvent(new Event('input'));
+
+    // SCROLL: After user message is added
+    autoScrollToBottom();
+
+    // Create assistant message placeholder
+    const assistantMessageId = `msg-${Date.now()}-assistant-${Math.random().toString(36).substr(2, 5)}`;
+    const assistantBubble = document.createElement('div');
+    assistantBubble.className = 'chat-bubble assistant-bubble';
+    assistantBubble.id = assistantMessageId;
+
+    let currentStatus = "🚀 Starting processing...";
+    assistantBubble.innerHTML = `
+        <div class="message-content">
+            <span class="typing-cursor">${currentStatus}</span>
+        </div>
+    `;
+
+    $('#chat-messages').appendChild(assistantBubble);
+    autoScrollToBottom();
+
+    // Add timeout handling
+    const TIMEOUT_MS = 45000; // 45 seconds
+    let responseComplete = false;
+    const timeoutId = setTimeout(() => {
+        if (!responseComplete) {
+            currentStatus = "⚠️ Taking longer than expected...";
+            const messageContent = assistantBubble.querySelector('.message-content');
+            if (messageContent) {
+                messageContent.innerHTML = `<span class="typing-cursor">${currentStatus}</span>`;
+            }
+            autoScrollToBottom();
         }
-        
-        // Add user message to history
-        const userMessage = {
-            role: 'user',
-            content: query,
-            messageId: `msg-${Date.now()}-user-${Math.random().toString(36).substr(2, 5)}`
-        };
-        
-        state.chatHistory[projId].push(userMessage);
-        
-        // Render user message with actions
-        const userMessageDiv = renderEnhancedMessage(query, 'user', userMessage.messageId);
-        $('#chat-messages').appendChild(userMessageDiv);
-        
-        input.value = '';
-        input.dispatchEvent(new Event('input'));
-        
-        // SCROLL: After user message is added
-        autoScrollToBottom();
-        
-        // Create assistant message placeholder
-        const assistantMessageId = `msg-${Date.now()}-assistant-${Math.random().toString(36).substr(2, 5)}`;
-        const assistantBubble = document.createElement('div');
-        assistantBubble.className = 'chat-bubble assistant-bubble';
-        assistantBubble.id = assistantMessageId;
-        
-        let currentStatus = "🚀 Starting processing...";
+    }, TIMEOUT_MS);
+
+    try {
+        const response = await apiRequest('/chat', {
+            method: 'POST',
+            stream: true,
+            body: JSON.stringify({
+                project_id: parseInt(projId),
+                query: query,
+                conversation_id: state.conversationId[projId] || null,
+            }),
+        });
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let fullResponse = "";
+        let metaData = {};
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            let chunk = decoder.decode(value, { stream: true });
+
+            // Handle status updates
+            if (chunk.includes("[[[STATUS]]]")) {
+                currentStatus = chunk.replace("[[[STATUS]]]", "").trim();
+                const messageContent = assistantBubble.querySelector('.message-content');
+                if (messageContent) {
+                    if (fullResponse) {
+                        messageContent.innerHTML = `
+                            <div class="status-container">
+                                <span class="typing-cursor">${currentStatus}</span>
+                                <div style="margin-top: 10px; opacity: 0.8;">${marked.parse(fullResponse + " ▌")}</div>
+                            </div>
+                        `;
+                    } else {
+                        messageContent.innerHTML = `<span class="typing-cursor">${currentStatus}</span>`;
+                    }
+                }
+                autoScrollToBottom();
+                continue;
+            }
+
+            // Handle metadata (may be emitted early or at end)
+            // In handleChatSubmit - FIX METADATA PARSING:
+
+            // Handle metadata (may be emitted early or at end)
+            if (chunk.includes("[[[META]]]")) {
+                const parts = chunk.split("[[[META]]]");
+                chunk = parts[0];
+                try {
+                    const metaString = parts[1] || "{}";
+                    console.log("🔍 Raw metadata string:", metaString); // DEBUG
+                    metaData = JSON.parse(metaString);
+                    console.log("✅ Parsed metadata:", metaData); // DEBUG
+                    
+                    // If meta contains conversation_id, persist immediately
+                    if (metaData.conversation_id) {
+                        state.conversationId[projId] = metaData.conversation_id;
+                    }
+                    // CRITICAL FIX: Update user message with query_id immediately
+                    if (metaData.query_id && userMessage) {
+                        userMessage.query_id = metaData.query_id;
+                        console.log("🔄 Updated user message with query_id:", metaData.query_id);
+                    }
+                } catch (e) {
+                    console.error('❌ Failed to parse metadata chunk:', e, 'Raw:', parts[1]);
+                    metaData = {}; // Ensure it's always an object
+                }
+            }
+
+            fullResponse += chunk;
+            console.log("🧩 Current fullResponse:", fullResponse); // DEBUG
+
+            // Update with both status and accumulated response
+            const messageContent = assistantBubble.querySelector('.message-content');
+            if (messageContent) {
+                messageContent.innerHTML = `
+                    <div class="status-container">
+                        <span class="typing-cursor">${currentStatus}</span>
+                        <div style="margin-top: 10px; opacity: 0.8;">${marked.parse(fullResponse + " ▌")}</div>
+                    </div>
+                `;
+            }
+
+            autoScrollToBottom();
+        }
+
+        // Clear timeout and mark as complete
+        clearTimeout(timeoutId);
+        responseComplete = true;
+
+        // Final update - remove status and show only the response with actions
         assistantBubble.innerHTML = `
-            <div class="message-content">
-                <span class="typing-cursor">${currentStatus}</span>
+            <div class="message-content">${marked.parse(fullResponse)}</div>
+            <div class="message-actions">
+                <button class="action-btn copy" title="Copy message content">
+                    <i class="fas fa-copy"></i> Copy
+                </button>
             </div>
         `;
-        
-        $('#chat-messages').appendChild(assistantBubble);
-        
-        // SCROLL: After assistant placeholder is created
-        autoScrollToBottom();
-        
-        // Add timeout handling
-        const TIMEOUT_MS = 45000; // 45 seconds
-        let responseComplete = false;
-        const timeoutId = setTimeout(() => {
-            if (!responseComplete) {
-                currentStatus = "⚠️ Taking longer than expected...";
-                const messageContent = assistantBubble.querySelector('.message-content');
-                if (messageContent) {
-                    messageContent.innerHTML = `<span class="typing-cursor">${currentStatus}</span>`;
-                }
-                $('#chat-container').scrollTop = $('#chat-container').scrollHeight;
-            }
-        }, TIMEOUT_MS);
 
-        try {
-            const response = await apiRequest('/chat', {
-                method: 'POST',
-                stream: true,
-                body: JSON.stringify({
-                    project_id: parseInt(projId),
-                    query: query,
-                    conversation_id: state.conversationId[projId] || null,
-                }),
-            });
-            
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let fullResponse = "";
-            let metaData = {};
-            
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                
-                let chunk = decoder.decode(value, { stream: true });
-                
-                // Handle status updates
-                if (chunk.includes("[[[STATUS]]]")) {
-                    currentStatus = chunk.replace("[[[STATUS]]]", "").trim();
-                    // Update with status only or status + partial response
-                    const messageContent = assistantBubble.querySelector('.message-content');
-                    if (messageContent) {
-                        if (fullResponse) {
-                            messageContent.innerHTML = `
-                                <div class="status-container">
-                                    <span class="typing-cursor">${currentStatus}</span>
-                                    <div style="margin-top: 10px; opacity: 0.8;">${marked.parse(fullResponse + " ▌")}</div>
-                                </div>
-                            `;
-                        } else {
-                            messageContent.innerHTML = `<span class="typing-cursor">${currentStatus}</span>`;
-                        }
-                    }
-                    $('#chat-container').scrollTop = $('#chat-container').scrollHeight;
-                    continue;
-                }
-                
-                // Handle metadata
-                if (chunk.includes("[[[META]]]")) {
-                    const parts = chunk.split("[[[META]]]");
-                    chunk = parts[0];
-                    try {
-                        metaData = JSON.parse(parts[1]);
-                    } catch (e) {
-                        console.error('Failed to parse metadata:', e);
-                    }
-                }
-                
-                fullResponse += chunk;
-                
-                // Update with both status and accumulated response
-                const messageContent = assistantBubble.querySelector('.message-content');
-                if (messageContent) {
-                    messageContent.innerHTML = `
-                        <div class="status-container">
-                            <span class="typing-cursor">${currentStatus}</span>
-                            <div style="margin-top: 10px; opacity: 0.8;">${marked.parse(fullResponse + " ▌")}</div>
-                        </div>
-                    `;
-                }
-                
-                $('#chat-container').scrollTop = $('#chat-container').scrollHeight;
-            }
-            
-            // Clear timeout and mark as complete
-            clearTimeout(timeoutId);
-            responseComplete = true;
-
-            console.log('=== RAW LLM OUTPUT ===');
-            console.log(fullResponse);
-            console.log('=== SECTIONS FOUND ===');
-            console.log('Summary:', fullResponse.includes('Summary'));
-            console.log('SQL Query:', fullResponse.includes('SQL Query'));
-            console.log('Explanation Diagram:', fullResponse.includes('Explanation Diagram'));
-            console.log('Notes:', fullResponse.includes('Notes'));
-            console.log('=====================');
-
-            // Final update - remove status and show only the response with actions
-            assistantBubble.innerHTML = `
-                <div class="message-content">${marked.parse(fullResponse)}</div>
-                <div class="message-actions">
-                    <button class="action-btn copy" title="Copy message content">
-                        <i class="fas fa-copy"></i> Copy
-                    </button>
-                </div>
-            `;
-            
-            // Attach copy functionality
-            const copyBtn = assistantBubble.querySelector('.action-btn.copy');
-            if (copyBtn) {
-                copyBtn.addEventListener('click', () => {
-                    const content = extractTextContent(assistantBubble);
-                    if (content && content.trim()) {
-                        copyToClipboard(content);
-                        showCopyFeedback(copyBtn);
-                    }
-                });
-            }
-            
-            enhanceCodeBlocks(assistantBubble);
-            
-            // Add to chat history
-            const assistantMessage = {
-                role: 'assistant',
-                content: fullResponse,
-                user_query: query,
-                query_id: metaData.query_id,
-                contexts: metaData.contexts,
-                messageId: assistantMessageId
-            };
-            
-            state.chatHistory[projId].push(assistantMessage);
-            
-            if (metaData.conversation_id) {
-                state.conversationId[projId] = metaData.conversation_id;
-            }
-            
-            addFeedbackSection(assistantBubble, assistantMessage);
-            
-            // SCROLL: Final scroll after complete response
-            autoScrollToBottom();
-            
-        } catch (error) {
-            // Clear timeout on error
-            clearTimeout(timeoutId);
-            responseComplete = true;
-            
-            // Show error message with copy button
-            assistantBubble.innerHTML = `
-                <div class="message-content" style="color: var(--danger);">
-                    <strong>Error:</strong> ${error.message}
-                </div>
-                <div class="message-actions">
-                    <button class="action-btn copy" title="Copy error message">
-                        <i class="fas fa-copy"></i> Copy
-                    </button>
-                </div>
-            `;
-            
-            const copyBtn = assistantBubble.querySelector('.action-btn.copy');
-            if (copyBtn) {
-                copyBtn.addEventListener('click', () => {
-                    const content = `Error: ${error.message}`;
+        // Attach copy functionality
+        const copyBtn = assistantBubble.querySelector('.action-btn.copy');
+        if (copyBtn) {
+            copyBtn.addEventListener('click', () => {
+                const content = extractTextContent(assistantBubble);
+                if (content && content.trim()) {
                     copyToClipboard(content);
                     showCopyFeedback(copyBtn);
-                });
-            }
-            
-            // Add error to chat history for continuity
-            const errorMessage = {
-                role: 'assistant',
-                content: `Error: ${error.message}`,
-                user_query: query,
-                messageId: assistantMessageId
-            };
-            state.chatHistory[projId].push(errorMessage);
-            
-            // SCROLL: Even on error
-            autoScrollToBottom();
+                }
+            });
         }
-        
-        removeRegenerationIndicator(userMessageDiv);
+
+        enhanceCodeBlocks(assistantBubble);
+
+        // Add to chat history
+        const assistantMessage = {
+            role: 'assistant',
+            content: fullResponse,
+            user_query: query,
+            query_id: userMessage.query_id || metaData.query_id,
+            contexts: metaData.contexts|| [],
+            messageId: assistantMessageId
+        };
+
+        state.chatHistory[projId].push(assistantMessage);
+
+        if (metaData.conversation_id) {
+            state.conversationId[projId] = metaData.conversation_id;
+        }
+        // Update user message with query_id from metadata
+        if (metaData.query_id) {
+            userMessage.query_id = metaData.query_id;
+        }
+
+        addFeedbackSection(assistantBubble, assistantMessage);
+
+        autoScrollToBottom();
+
+    } catch (error) {
+        clearTimeout(timeoutId);
+        responseComplete = true;
+
+        assistantBubble.innerHTML = `
+            <div class="message-content" style="color: var(--danger);">
+                <strong>Error:</strong> ${error.message}
+            </div>
+            <div class="message-actions">
+                <button class="action-btn copy" title="Copy error message">
+                    <i class="fas fa-copy"></i> Copy
+                </button>
+            </div>
+        `;
+
+        const copyBtn = assistantBubble.querySelector('.action-btn.copy');
+        if (copyBtn) {
+            copyBtn.addEventListener('click', () => {
+                const content = `Error: ${error.message}`;
+                copyToClipboard(content);
+                showCopyFeedback(copyBtn);
+            });
+        }
+
+        const errorMessage = {
+            role: 'assistant',
+            content: `Error: ${error.message}`,
+            user_query: query,
+            messageId: assistantMessageId
+        };
+        state.chatHistory[projId].push(errorMessage);
+
+        autoScrollToBottom();
+    } finally {
+        // Re-enable send UI only after assistant finished (success or error)
+        enableSendUI();
     }
+}
 
     function addFeedbackSection(bubble, message) { 
         console.log('Message in addFeedbackSection:', message); // DEBUG
@@ -876,6 +964,20 @@ document.addEventListener('DOMContentLoaded', () => {
         // Sort messages by creation date to show in chronological order
         messages = messages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
         
+
+        // DEBUG: Log the raw data from database
+        console.log('🔍 RAW MESSAGES FROM DATABASE:', messages);
+        console.log('📊 Total messages in conversation:', messages.length);
+        
+        messages.forEach((msg, index) => {
+            console.log(`📝 Message ${index + 1}:`, {
+                query_id: msg.id,
+                query: msg.query?.substring(0, 50) + '...',
+                answer: msg.answer?.substring(0, 50) + '...',
+                created_at: msg.created_at
+            });
+        });
+        
         // Clear the transcript and add header
         transcriptDiv.innerHTML = '<h3>Conversation</h3>';
         
@@ -907,12 +1009,14 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Process messages in chronological order and interleave user/assistant messages
             messages.forEach(msg => {
+                const queryId = msg.id;
                 // Add user message
                 state.chatHistory[projectId].push({
                     role: 'user',
                     content: msg.query,
                     user_query: msg.query,
-                    query_id: msg.query_id || null,
+                    query_id: queryId,
+                    originalContent: msg.query,
                     contexts: msg.contexts || []
                 });
                 
@@ -921,7 +1025,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     role: 'assistant',
                     content: msg.answer,
                     user_query: msg.query,
-                    query_id: msg.query_id || null,
+                    query_id: queryId,
                     contexts: msg.contexts || []
                 });
             });
@@ -930,7 +1034,7 @@ document.addEventListener('DOMContentLoaded', () => {
             navigateTo('query');
             renderChatHistory();
         };
-        enhanceCodeBlocks();
+        enhanceCodeBlocksInContainer(transcriptDiv);
     }
 
     async function loadAnalyticsData() { 
@@ -1432,7 +1536,10 @@ function enableMessageEditing(messageDiv, originalContent) {
 }
 
 /**
- * Save edited message and regenerate response
+ * Save edited message and update database
+ */
+/**
+ * Save edited message and trigger regeneration
  */
 async function saveEditedMessage(messageDiv, newContent) {
     if (!newContent.trim()) {
@@ -1448,18 +1555,48 @@ async function saveEditedMessage(messageDiv, newContent) {
         return;
     }
 
-    // Update the message in chat history
-    const messageIndex = findMessageIndexInHistory(projectId, messageId);
-    if (messageIndex !== -1) {
-        state.chatHistory[projectId][messageIndex].content = newContent;
-        state.chatHistory[projectId][messageIndex].isEdited = true;
+    try {
+        // Find the message in chat history
+        const messageIndex = findMessageIndexInHistory(projectId, messageId);
+        if (messageIndex === -1) {
+            throw new Error('Message not found in history');
+        }
+
+        const message = state.chatHistory[projectId][messageIndex];
+        
+        if (!message.query_id) {
+            throw new Error('No query ID found for this message');
+        }
+
+        // Update the message in chat history
+        const originalContent = message.content;
+        message.content = newContent;
+        message.originalContent = originalContent; // Store original for reference
+        message.isEdited = true;
+
+        // Update the database
+        if (message.role === 'user') {
+            await updateQueryInDatabase(message.query_id, newContent, null);
+            message.user_query = newContent;
+            restoreMessageDisplay(messageDiv, newContent);
+            // ✅ AUTO-REGENERATE AFTER EDITING USER MESSAGE
+            console.log('🔄 Auto-regenerating after edit...');
+            await regenerateResponse(messageDiv, newContent);
+            
+        } else if (message.role === 'assistant') {
+            await updateQueryInDatabase(message.query_id, null, newContent);
+            // For assistant messages, just update the display
+            restoreMessageDisplay(messageDiv, newContent);
+            showCopyFeedback(messageDiv.querySelector('.action-btn.edit'));
+        }
+
+    } catch (error) {
+        console.error('Failed to save edited message:', error);
+        showError('Failed to save changes', '#main-error');
+        // Restore original content on error
+        const originalMessage = state.chatHistory[projectId][findMessageIndexInHistory(projectId, messageId)];
+        restoreMessageDisplay(messageDiv, originalMessage.originalContent || newContent);
     }
-
-    // Restore message display
-    restoreMessageDisplay(messageDiv, newContent);
-
-    // Trigger regeneration
-    await regenerateResponse(messageDiv, newContent);
 }
 
 /**
@@ -1470,9 +1607,9 @@ function cancelMessageEditing(messageDiv, originalContent) {
 }
 
 /**
- * Restore message display after editing
+ * Restore message display after editing (with regeneration in progress)
  */
-function restoreMessageDisplay(messageDiv, content) {
+function restoreMessageDisplay(messageDiv, content, isRegenerating = false) {
     // Remove edit actions
     const editActions = messageDiv.querySelector('.edit-actions');
     if (editActions) editActions.remove();
@@ -1482,28 +1619,44 @@ function restoreMessageDisplay(messageDiv, content) {
     if (textarea) {
         const contentDiv = document.createElement('div');
         contentDiv.className = 'message-content';
-        contentDiv.innerHTML = marked.parse(escapeHtml(content));
+        
+        if (isRegenerating) {
+            // Show "Regenerating..." state
+            contentDiv.innerHTML = `
+                <div class="message-content">
+                    <span class="typing-cursor">${content}</span>
+                    <div class="regeneration-indicator">
+                        <i class="fas fa-sync-alt fa-spin"></i> Regenerating...
+                    </div>
+                </div>
+            `;
+        } else {
+            // Show final content
+            contentDiv.innerHTML = marked.parse(escapeHtml(content));
+        }
         
         textarea.parentNode.replaceChild(contentDiv, textarea);
     }
     
-    // Restore action buttons
-    const messageActions = messageDiv.querySelector('.message-actions');
-    messageActions.innerHTML = `
-        <button class="action-btn edit" title="Edit message"><i class="fas fa-edit"></i></button>
-        <button class="action-btn regenerate" title="Regenerate response"><i class="fas fa-sync-alt"></i></button>
-        <button class="action-btn copy" title="Copy message"><i class="fas fa-copy"></i></button>
-    `;
-    
-    // Re-attach event handlers
-    attachMessageActions(messageDiv, 'user', content);
+    if (!isRegenerating) {
+        // Only restore action buttons when not regenerating
+        const messageActions = messageDiv.querySelector('.message-actions');
+        messageActions.innerHTML = `
+            <button class="action-btn edit" title="Edit message"><i class="fas fa-edit"></i></button>
+            <button class="action-btn regenerate" title="Regenerate response"><i class="fas fa-sync-alt"></i></button>
+            <button class="action-btn copy" title="Copy message"><i class="fas fa-copy"></i></button>
+        `;
+        
+        // Re-attach event handlers
+        attachMessageActions(messageDiv, 'user', content);
+    }
 }
 
 /**
- * Regenerate response for a message
+ * Regenerate response for a message (including after edits)
  */
 /**
- * Regenerate response for a message
+ * Regenerate response for a message and REPLACE existing assistant message
  */
 async function regenerateResponse(messageDiv, content) {
     const projectId = state.selectedProjectId;
@@ -1512,22 +1665,40 @@ async function regenerateResponse(messageDiv, content) {
         return;
     }
 
-    // Find and remove subsequent messages (to regenerate from this point)
+    // Find the user message that we're regenerating from
     const messageId = messageDiv.id;
-    removeSubsequentMessages(projectId, messageId);
+    const messageIndex = findMessageIndexInHistory(projectId, messageId);
     
-    // Add regeneration indicator
-    addRegenerationIndicator(messageDiv);
+    if (messageIndex === -1) {
+        showError('Message not found', '#main-error');
+        return;
+    }
+
+    const userMessage = state.chatHistory[projectId][messageIndex];
+    const originalQueryId = userMessage.query_id;
+
+    if (!originalQueryId) {
+        showError('Cannot regenerate: No query ID found', '#main-error');
+        return;
+    }
+
+    // Add regeneration indicator to user message
     
-    // SCROLL: After adding regeneration indicator
-    autoScrollToBottom();
     
-    // Send the message again
-    await sendMessageForRegeneration(content, projectId);
-    
-    // Remove regeneration indicator after completion
-    removeRegenerationIndicator(messageDiv);
+    try {
+        // Find the existing assistant message ID to replace
+        const assistantMessageId = await findAssistantMessageId(projectId, originalQueryId);
+        
+        // Send the message for regeneration - this will REPLACE the existing assistant message
+        await sendMessageForRegeneration(content, projectId, originalQueryId, assistantMessageId);
+        
+    } catch (error) {
+        console.error('Regeneration failed:', error);
+        showError('Failed to regenerate response', '#main-error');
+        
+    }
 }
+
 /**
  * Find message index in chat history
  */
@@ -1540,59 +1711,393 @@ function findMessageIndexInHistory(projectId, messageId) {
 }
 
 /**
- * Remove subsequent messages from history
+ * Remove subsequent messages from history and UI (for clean regeneration)
  */
 function removeSubsequentMessages(projectId, messageId) {
     if (!state.chatHistory[projectId]) return;
     
     const messageIndex = findMessageIndexInHistory(projectId, messageId);
     if (messageIndex !== -1) {
-        state.chatHistory[projectId] = state.chatHistory[projectId].slice(0, messageIndex + 1);
+        // Only remove messages AFTER the assistant response
+        // We want to keep: [User] -> [Assistant] structure
+        const messagesToKeep = messageIndex + 2; // Keep user + assistant
+        
+        if (state.chatHistory[projectId].length > messagesToKeep) {
+            state.chatHistory[projectId] = state.chatHistory[projectId].slice(0, messagesToKeep);
+            
+            // Remove from UI (only messages after the assistant)
+            const messagesContainer = $('#chat-messages');
+            const allMessages = messagesContainer.querySelectorAll('.message-container');
+            
+            for (let i = allMessages.length - 1; i >= messagesToKeep; i--) {
+                allMessages[i].remove();
+            }
+        }
     }
 }
 
-/**
- * Add regeneration indicator
+ /**
+ * Send message for regeneration and REPLACE existing assistant response
  */
-function addRegenerationIndicator(messageDiv) {
-    const existingIndicator = messageDiv.querySelector('.regeneration-indicator');
-    if (existingIndicator) return;
-    
-    const indicator = document.createElement('div');
-    indicator.className = 'regeneration-indicator';
-    indicator.innerHTML = '<i class="fas fa-sync-alt"></i> Regenerating response...';
-    
-    messageDiv.appendChild(indicator);
-}
-
-/**
- * Remove regeneration indicator
- */
-function removeRegenerationIndicator(messageDiv) {
-    const indicator = messageDiv.querySelector('.regeneration-indicator');
-    if (indicator) {
-        indicator.remove();
-    }
-}
-
-/**
- * Send message for regeneration
- */
-async function sendMessageForRegeneration(content, projectId) {
+async function sendMessageForRegeneration(content, projectId, existingQueryId) {
     const input = $('#chat-input');
     const originalValue = input.value;
     
-    // Set input value and trigger send
+    // Set input value
     input.value = content;
     
     try {
-        await handleChatSubmit(new Event('submit'), true);
+        // Store the existing query ID for the special API call
+        state.regeneratingQueryId = existingQueryId;
+        
+        // Find and prepare to replace the existing assistant message
+        const assistantMessageId = await findAssistantMessageId(projectId, existingQueryId);
+        
+        // Use a modified version that REPLACES the assistant message
+        await handleRegenerationSubmit(content, projectId, existingQueryId, assistantMessageId);
+        
     } catch (error) {
         console.error('Regeneration failed:', error);
         showError('Failed to regenerate response', '#main-error');
     } finally {
-        // Restore input value
+        // Restore input value and clear state
         input.value = originalValue;
+        state.regeneratingQueryId = null;
+    }
+}
+
+/**
+ * Find the assistant message ID that corresponds to a user query
+ */
+async function findAssistantMessageId(projectId, queryId) {
+    if (!state.chatHistory[projectId]) return null;
+    
+    // Find the user message with this query_id
+    const userMessageIndex = state.chatHistory[projectId].findIndex(msg => 
+        msg.query_id === queryId && msg.role === 'user'
+    );
+    
+    if (userMessageIndex === -1 || userMessageIndex >= state.chatHistory[projectId].length - 1) {
+        return null;
+    }
+    
+    // The next message should be the assistant response
+    const assistantMessage = state.chatHistory[projectId][userMessageIndex + 1];
+    if (assistantMessage && assistantMessage.role === 'assistant') {
+        return assistantMessage.messageId;
+    }
+    
+    return null;
+}
+/**
+ * Handle regeneration submit - UPDATES existing assistant message instead of creating new one
+ */
+/**
+ * Handle regeneration submit - UPDATES existing assistant message instead of creating new one
+ */
+async function handleRegenerationSubmit(query, projectId, existingQueryId, assistantMessageIdToReplace = null) {
+    if (!query || !projectId || !existingQueryId) return;
+
+    const projId = projectId;
+
+    disableSendUI();
+
+    // Find the existing assistant message in chat history
+    let existingAssistantMessage = null;
+    let existingAssistantIndex = -1;
+    
+    if (state.chatHistory[projId]) {
+        existingAssistantIndex = state.chatHistory[projId].findIndex(msg => 
+            msg.query_id === existingQueryId && msg.role === 'assistant'
+        );
+        
+        if (existingAssistantIndex !== -1) {
+            existingAssistantMessage = state.chatHistory[projId][existingAssistantIndex];
+        }
+    }
+
+    // Get or create assistant container
+    let assistantContainer;
+    let assistantMessageId;
+    
+    if (assistantMessageIdToReplace && $(`#${assistantMessageIdToReplace}`)) {
+        // USE EXISTING container - don't replace the entire structure
+        assistantMessageId = assistantMessageIdToReplace;
+        assistantContainer = $(`#${assistantMessageIdToReplace}`);
+        
+        // ✅ FIX: Update content INSIDE the existing structure
+        const messageContent = assistantContainer.querySelector('.message-content');
+        const messageActions = assistantContainer.querySelector('.message-actions');
+        
+        if (messageContent) {
+            messageContent.innerHTML = `<span class="typing-cursor">🔄 Regenerating response...</span>`;
+        }
+        
+        // Hide actions during regeneration
+        if (messageActions) {
+            messageActions.style.display = 'none';
+        }
+        
+    } else {
+        // Fallback: create new container (shouldn't happen often)
+        assistantMessageId = `msg-${Date.now()}-assistant-${Math.random().toString(36).substr(2, 5)}`;
+        
+        assistantContainer = document.createElement('div');
+        assistantContainer.className = 'message-container assistant-container';
+        assistantContainer.id = assistantMessageId;
+        
+        assistantContainer.innerHTML = `
+            <div class="chat-bubble assistant-bubble">
+                <div class="message-content">
+                    <span class="typing-cursor">🔄 Regenerating response...</span>
+                </div>
+                <div class="message-actions" style="display: none;">
+                    <button class="action-btn copy" title="Copy message content">
+                        <i class="fas fa-copy"></i> Copy
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        $('#chat-messages').appendChild(assistantContainer);
+    }
+
+    let currentStatus = "🔄 Regenerating response...";
+    autoScrollToBottom();
+
+    try {
+        // Special API call for regeneration that updates existing query
+        const response = await apiRequest('/chat/regenerate', {
+            method: 'POST',
+            stream: true,
+            body: JSON.stringify({
+                project_id: parseInt(projId),
+                query: query,
+                query_id: existingQueryId, // Tell backend to update existing query
+                conversation_id: state.conversationId[projId] || null,
+            }),
+        });
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let fullResponse = "";
+        let metaData = {};
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            let chunk = decoder.decode(value, { stream: true });
+
+            // Handle status updates
+            if (chunk.includes("[[[STATUS]]]")) {
+                currentStatus = chunk.replace("[[[STATUS]]]", "").trim();
+                const messageContent = assistantContainer.querySelector('.message-content');
+                if (messageContent) {
+                    if (fullResponse) {
+                        messageContent.innerHTML = `
+                            <div class="status-container">
+                                <span class="typing-cursor">${currentStatus}</span>
+                                <div style="margin-top: 10px; opacity: 0.8;">${marked.parse(fullResponse + " ▌")}</div>
+                            </div>
+                        `;
+                    } else {
+                        messageContent.innerHTML = `<span class="typing-cursor">${currentStatus}</span>`;
+                    }
+                }
+                autoScrollToBottom();
+                continue;
+            }
+
+            // Handle metadata
+            if (chunk.includes("[[[META]]]")) {
+                const parts = chunk.split("[[[META]]]");
+                chunk = parts[0];
+                try {
+                    const metaString = parts[1] || "{}";
+                    console.log("🔍 Raw metadata string:", metaString); // DEBUG
+                    metaData = JSON.parse(metaString);
+                    console.log("✅ Parsed metadata:", metaData); // DEBUG
+                    
+                    // If meta contains conversation_id, persist immediately
+                    if (metaData.conversation_id) {
+                        state.conversationId[projId] = metaData.conversation_id;
+                    }
+                    console.log("🔄 Regeneration using query_id:", existingQueryId);
+                } catch (e) {
+                    console.error('❌ Failed to parse metadata chunk:', e, 'Raw:', parts[1]);
+                    metaData = {}; // Ensure it's always an object
+                }
+            }
+
+            fullResponse += chunk;
+
+            // Update with both status and accumulated response
+            const messageContent = assistantContainer.querySelector('.message-content');
+            if (messageContent) {
+                messageContent.innerHTML = `
+                    <div class="status-container">
+                        <span class="typing-cursor">${currentStatus}</span>
+                        <div style="margin-top: 10px; opacity: 0.8;">${marked.parse(fullResponse + " ▌")}</div>
+                    </div>
+                `;
+            }
+
+            autoScrollToBottom();
+        }
+
+        // ✅ FIX: Update content INSIDE existing structure, don't replace entire container
+        const messageContent = assistantContainer.querySelector('.message-content');
+        const messageActions = assistantContainer.querySelector('.message-actions');
+        
+        if (messageContent) {
+            messageContent.innerHTML = marked.parse(fullResponse);
+        }
+        
+        if (messageActions) {
+            messageActions.style.display = 'flex';
+            messageActions.innerHTML = `
+                <button class="action-btn copy" title="Copy message content">
+                    <i class="fas fa-copy"></i> Copy
+                </button>
+            `;
+            
+            // Re-attach copy functionality
+            const copyBtn = messageActions.querySelector('.action-btn.copy');
+            if (copyBtn) {
+                copyBtn.addEventListener('click', () => {
+                    const content = extractTextContent(assistantContainer);
+                    if (content && content.trim()) {
+                        copyToClipboard(content);
+                        showCopyFeedback(copyBtn);
+                    }
+                });
+            }
+        }
+
+        enhanceCodeBlocks(assistantContainer);
+
+        // ✅ UPDATE existing assistant message in chat history (don't add new one)
+        if (existingAssistantIndex !== -1) {
+            // Update the existing assistant message
+            state.chatHistory[projId][existingAssistantIndex] = {
+                role: 'assistant',
+                content: fullResponse,
+                user_query: query,
+                query_id: metaData.query_id || existingQueryId, // Same query_id as the user message
+                contexts: metaData.contexts,
+                messageId: assistantMessageId,
+                isRegenerated: true
+            };
+        } else {
+            // Fallback: add new message if existing not found
+            const assistantMessage = {
+                role: 'assistant',
+                content: fullResponse,
+                user_query: query,
+                query_id: metaData.query_id || existingQueryId,
+                contexts: metaData.contexts,
+                messageId: assistantMessageId,
+                isRegenerated: true
+            };
+            state.chatHistory[projId].push(assistantMessage);
+        }
+
+        // Update conversation ID if provided
+        if (metaData.conversation_id) {
+            state.conversationId[projId] = metaData.conversation_id;
+        }
+
+        // ✅ ADD FEEDBACK SECTION - SAME AS handleChatSubmit
+        const assistantBubble = assistantContainer.querySelector('.assistant-bubble');
+        if (assistantBubble) {
+            // Remove existing feedback section if present
+            const existingFeedback = assistantBubble.querySelector('.feedback-section');
+            if (existingFeedback) {
+                existingFeedback.remove();
+            }
+            addFeedbackSection(assistantBubble, state.chatHistory[projId][existingAssistantIndex !== -1 ? existingAssistantIndex : state.chatHistory[projId].length - 1]);
+        }
+        
+        autoScrollToBottom();
+
+    } catch (error) {
+        console.error('Regeneration API error:', error);
+        
+        // ✅ FIX: Update content INSIDE existing structure for errors too
+        const messageContent = assistantContainer.querySelector('.message-content');
+        const messageActions = assistantContainer.querySelector('.message-actions');
+        
+        if (messageContent) {
+            messageContent.innerHTML = `<div style="color: var(--danger);"><strong>Error:</strong> ${error.message}</div>`;
+        }
+        
+        if (messageActions) {
+            messageActions.style.display = 'flex';
+            messageActions.innerHTML = `
+                <button class="action-btn copy" title="Copy error message">
+                    <i class="fas fa-copy"></i> Copy
+                </button>
+            `;
+            
+            const copyBtn = messageActions.querySelector('.action-btn.copy');
+            if (copyBtn) {
+                copyBtn.addEventListener('click', () => {
+                    const content = `Error: ${error.message}`;
+                    copyToClipboard(content);
+                    showCopyFeedback(copyBtn);
+                });
+            }
+        }
+
+        // Update error in chat history too
+        if (existingAssistantIndex !== -1) {
+            state.chatHistory[projId][existingAssistantIndex] = {
+                role: 'assistant',
+                content: `Error: ${error.message}`,
+                user_query: query,
+                query_id: existingQueryId,
+                messageId: assistantMessageId,
+                isRegenerated: true,
+                hasError: true
+            };
+        }
+        autoScrollToBottom();
+    } finally {
+        // Re-enable send UI only after assistant finished (success or error)
+        enableSendUI();
+    }
+}
+/**
+ * Update query in database (both query and answer)
+ */
+async function updateQueryInDatabase(queryId, newQuery = null, newAnswer = null) {
+    if (!queryId) {
+        console.warn('No query ID provided for update');
+        return;
+    }
+
+    try {
+        const updateData = {};
+        if (newQuery !== null) updateData.query = newQuery;
+        if (newAnswer !== null) updateData.answer = newAnswer;
+
+        if (Object.keys(updateData).length === 0) {
+            console.warn('No data to update');
+            return;
+        }
+
+        // Call backend API to update the query
+        await apiRequest(`/queries/${queryId}`, {
+            method: 'PUT',
+            body: JSON.stringify(updateData)
+        });
+
+        console.log('✅ Successfully updated query in database:', queryId);
+        
+    } catch (error) {
+        console.error('❌ Failed to update query in database:', error);
+        throw new Error(`Database update failed: ${error.message}`);
     }
 }
 
