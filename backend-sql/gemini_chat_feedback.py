@@ -7,7 +7,7 @@ import time
 import random
 import logging
 import re
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 import numpy as np
 from pydantic import BaseModel
@@ -976,7 +976,7 @@ def generation_agent(state: AgentState) -> AgentState:
             ```sql SELECT * FROM ... ```
 
             **Explanation Diagram**
-            ASCII diagram showing tables, relationships, and key operations
+            ASCII diagram showing tables, relationships, and key operations "```  Diagram ```".
 
             **Notes**
             * List any assumptions made.
@@ -1329,20 +1329,53 @@ agent_workflow = create_agent_workflow()
 # ----------------------------
 # Chat Model (Updated to use LangGraph)
 # ----------------------------
+# Modify ChatRequest model to include original_query_id
 class ChatRequest(BaseModel):
     project_id: int
     query: str
     conversation_id: Optional[str] = None
     top_k: int = 5
+    original_query_id: Optional[str] = None  # << added
 
 @router.post("/chat")
-async def chat(req: ChatRequest, current_user: dict = Depends(get_current_user)):
+async def chat(req: ChatRequest, request: Request, current_user: dict = Depends(get_current_user)):
     user_id = current_user["user_id"]
     conversation_id = req.conversation_id or str(uuid.uuid4())
     safe_query = redact_pii(req.query)
     safe_query = sanitize_user_query(safe_query)
     start_time = time.time()
-    
+
+
+    # Store query in database initially — reuse original_query_id if provided
+    query_id = req.original_query_id or str(uuid.uuid4())
+
+    conn = get_connection()
+    c = conn.cursor()
+
+    if req.original_query_id:
+        # If provided, try to update existing row; if missing, insert a new row with that id
+        c.execute("SELECT id FROM queries WHERE id=?", (req.original_query_id,))
+        if c.fetchone():
+            c.execute("""
+                UPDATE queries
+                SET query = ?, answer = ?, response_time = ?, attempts = ?, is_fallback = ?
+                WHERE id = ?
+            """, (safe_query, "", 0, 0, False, req.original_query_id))
+        else:
+            c.execute("""
+                INSERT INTO queries (id, project_id, query, answer, user_id, conversation_id, response_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (query_id, req.project_id, safe_query, "", user_id, conversation_id, 0))
+    else:
+        # original not provided — insert new as before
+        c.execute("""
+            INSERT INTO queries (id, project_id, query, answer, user_id, conversation_id, response_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (query_id, req.project_id, safe_query, "", user_id, conversation_id, 0))
+
+    conn.commit()
+    conn.close()
+
     # Initialize memory if missing
     if conversation_id not in conversation_memory:
         conversation_memory[conversation_id] = []
@@ -1400,17 +1433,6 @@ async def chat(req: ChatRequest, current_user: dict = Depends(get_current_user))
     }
     
         
-    
-    # Store query in database initially
-    query_id = str(uuid.uuid4())
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("""
-        INSERT INTO queries (id, project_id, query, answer, user_id, conversation_id, response_time)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (query_id, req.project_id, safe_query, "", user_id, conversation_id, 0))
-    conn.commit()
-    conn.close()
     
     # Streaming response generator
     async def stream_and_save():
@@ -1482,6 +1504,219 @@ async def chat(req: ChatRequest, current_user: dict = Depends(get_current_user))
         yield f"[[[META]]]{json.dumps({'contexts': workflow_state.get('contexts', []), 'query_id': query_id, 'conversation_id': conversation_id})}"
     
     return StreamingResponse(stream_and_save(), media_type="text/plain")
+
+
+# ----------------------------
+# Update Query Endpoint
+# ----------------------------
+class QueryUpdateRequest(BaseModel):
+    query: Optional[str] = None
+    answer: Optional[str] = None
+
+@router.put("/queries/{query_id}")
+async def update_query(
+    query_id: str, 
+    req: QueryUpdateRequest, 
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Update an existing query in the database.
+    """
+    conn = get_connection()
+    c = conn.cursor()
+    
+    try:
+        # Verify the query exists and belongs to the user
+        c.execute("SELECT id FROM queries WHERE id=? AND user_id=?", (query_id, current_user["user_id"]))
+        existing_query = c.fetchone()
+        
+        if not existing_query:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Query not found")
+        
+        # Build update query dynamically based on provided fields
+        update_fields = []
+        update_values = []
+        
+        if req.query is not None:
+            update_fields.append("query = ?")
+            update_values.append(req.query)
+        
+        if req.answer is not None:
+            update_fields.append("answer = ?")
+            update_values.append(req.answer)
+        
+        if not update_fields:
+            conn.close()
+            raise HTTPException(status_code=400, detail="No fields to update")
+        
+        # Add query_id to values
+        update_values.append(query_id)
+        
+        # Execute update
+        update_query = f"UPDATE queries SET {', '.join(update_fields)} WHERE id = ?"
+        c.execute(update_query, update_values)
+        conn.commit()
+        
+        conn.close()
+        return {"status": "success", "message": "Query updated successfully"}
+        
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Failed to update query: {str(e)}")
+
+# ----------------------------
+# Regeneration Endpoint
+# ----------------------------
+class RegenerateRequest(BaseModel):
+    project_id: int
+    query: str
+    query_id: str  # Existing query ID to update
+    conversation_id: Optional[str] = None
+
+@router.post("/chat/regenerate")
+async def regenerate_chat(req: RegenerateRequest, current_user: dict = Depends(get_current_user)):
+    """
+    Regenerate response for an existing query (updates existing record instead of creating new one)
+    """
+    user_id = current_user["user_id"]
+    conversation_id = req.conversation_id or str(uuid.uuid4())
+    
+    # Verify the query exists and belongs to the user
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT id FROM queries WHERE id=? AND user_id=?", (req.query_id, user_id))
+    existing_query = c.fetchone()
+    
+    if not existing_query:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Query not found")
+    conn.close()
+
+    safe_query = redact_pii(req.query)
+    safe_query = sanitize_user_query(safe_query)
+    start_time = time.time()
+
+    # Initialize memory if missing
+    # Initialize memory if missing
+    if conversation_id not in conversation_memory:
+        conversation_memory[conversation_id] = []
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("""
+            SELECT query, answer FROM queries
+            WHERE conversation_id=? AND project_id=? AND user_id=?
+            ORDER BY created_at
+        """, (conversation_id, req.project_id, user_id))
+        rows = c.fetchall()
+        conn.close()
+        for q, a in rows:
+            conversation_memory[conversation_id].append({"role": "user", "content": q})
+            conversation_memory[conversation_id].append({"role": "assistant", "content": a})
+
+    memory = conversation_memory[conversation_id]
+    memory.append({"role": "user", "content": safe_query})
+
+    # Initialize state for LangGraph
+    initial_state = AgentState(
+        user_query=safe_query,
+        project_id=req.project_id,
+        conversation_id=conversation_id,
+        user_id=user_id,  
+        memory=memory,
+        query_intent="",
+        next_steps=[],
+        retrieval_mode="",
+        required_documents=[],
+        complexity="",
+        keyword_search_words=[],
+        generated_response="",
+        contexts=[],
+        attempt_count=0,
+        is_fallback=False,
+        current_step="start",
+        rag_metrics={},
+        validation_result="",
+        needs_improvement=False,
+        retry_target="none",
+        improvement_suggestions=[],
+        reflection_count=0
+    )
+
+    config = {
+        "configurable": {
+            "thread_id": conversation_id
+        }
+    }
+
+    # Streaming response generator for regeneration
+    async def stream_and_update():
+        # Send initial status
+        yield "[[[STATUS]]]🔄 Regenerating response..."
+
+        # Stream status updates during workflow execution
+        for current_state in agent_workflow.stream(initial_state, config=config):
+            for node_name, state in current_state.items():
+                if "current_status" in state:
+                    yield f"[[[STATUS]]]{state['current_status']}"
+            final_state = state
+        
+        workflow_state = final_state if final_state else agent_workflow.invoke(initial_state, config=config)
+        
+        # Get the final response
+        full_answer = workflow_state.get("generated_response", "")
+        
+        # Calculate response time
+        response_time = time.time() - start_time
+        
+        # Store assistant response in memory
+        memory.append({"role": "assistant", "content": full_answer})
+        
+        # Truncate memory if needed
+        if len(memory) > MAX_MEMORY_LENGTH:
+            conversation_memory[conversation_id] = memory[-MAX_MEMORY_LENGTH:]
+            
+        rag_metrics = workflow_state.get("rag_metrics", {})
+        
+        # UPDATE existing query instead of creating new one
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("""
+            UPDATE queries 
+            SET query = ?, answer = ?, response_time = ?, attempts = ?, is_fallback = ?,
+                precision1 = ?, precision3 = ?, precision5 = ?, 
+                claim_support = ?, static_exec = ?, query_coverage = ?, num_claims = ?
+            WHERE id = ?
+        """, (
+            safe_query,  # Update the query (in case it was edited)
+            full_answer, # Update the answer
+            response_time,
+            workflow_state.get("attempt_count", 1),
+            workflow_state.get("is_fallback", False),
+            rag_metrics.get("Precision@1"),
+            rag_metrics.get("Precision@3"),
+            rag_metrics.get("Precision@5"),
+            rag_metrics.get("ClaimSupportRate"),
+            rag_metrics.get("StaticExecScore"),
+            rag_metrics.get("QueryCoverage"),
+            rag_metrics.get("NumClaims"),
+            req.query_id  # The existing query ID
+        ))
+        conn.commit()
+        conn.close()
+        
+        # Send the COMPLETE response at the end
+        yield f"{full_answer}"
+        
+        # Send metadata at the end (with the same query_id)
+        yield f"[[[META]]]{json.dumps({
+            'contexts': workflow_state.get('contexts', []), 
+            'query_id': req.query_id,  # Same query_id as input
+            'conversation_id': conversation_id
+        })}"
+    
+    return StreamingResponse(stream_and_update(), media_type="text/plain")
+
 
 # ----------------------------
 # Feedback model (Unchanged)
